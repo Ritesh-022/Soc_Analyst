@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.ascense.example/contracts/common/audit-event-v1.json",
+  "title": "Audit Event v1",
+  "description": "Security-relevant activity record. Append-only, independently protected.",
+  "type": "object",
+  "required": [
+    "audit_event_id",
+    "tenant_id",
+    "action",
+    "actor_id",
+    "actor_type",
+    "outcome",
+    "occurred_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "audit_event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "action": {
+      "type": "string",
+      "description": "Namespaced action (e.g. command.dispatched, alert.acknowledged)"
+    },
+    "actor_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "actor_type": {
+      "type": "string",
+      "enum": [
+        "USER",
+        "SERVICE",
+        "GATEWAY"
+      ]
+    },
+    "target_type": {
+      "type": "string"
+    },
+    "target_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "success",
+        "failure"
+      ]
+    },
+    "trace_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

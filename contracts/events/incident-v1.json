@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.ascense.example/contracts/events/incident-v1.json",
+  "title": "Incident v1",
+  "description": "Connected security case containing one or more alerts, related assets, evidence, investigations, and responses.",
+  "type": "object",
+  "required": [
+    "incident_id",
+    "tenant_id",
+    "status",
+    "created_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "incident_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "title": {
+      "type": "string"
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "OPEN",
+        "TRIAGED",
+        "INVESTIGATING",
+        "CONTAINMENT_IN_PROGRESS",
+        "CONTAINED",
+        "RECOVERING",
+        "RESOLVED",
+        "CLOSED"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "alert_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      }
+    },
+    "affected_asset_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      }
+    },
+    "evidence_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

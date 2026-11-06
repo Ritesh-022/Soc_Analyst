@@ -1,0 +1,144 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.ascense.example/contracts/response/action-proposal-v1.json",
+  "title": "Action Proposal v1",
+  "description": "Proposed response action. A proposal is NOT a command. Any material change invalidates earlier approval.",
+  "type": "object",
+  "required": [
+    "proposal_id",
+    "tenant_id",
+    "incident_id",
+    "action_type",
+    "target",
+    "status"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "proposal_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "incident_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "action_type": {
+      "type": "string",
+      "enum": [
+        "block_network_indicator",
+        "isolate_asset"
+      ]
+    },
+    "target": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "network_indicator",
+            "asset",
+            "domain_indicator"
+          ]
+        },
+        "address": {
+          "type": "string"
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "egress",
+            "ingress",
+            "both"
+          ]
+        },
+        "gateway_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "protocol": {
+          "type": "string"
+        },
+        "ports": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 65535
+          }
+        },
+        "asset_id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "affected_asset_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "description": "Protected assets whose security posture is being changed \u2014 separate from target"
+    },
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "reason": {
+      "type": "string"
+    },
+    "evidence_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      }
+    },
+    "policy_version_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "created_by": {
+      "type": "string",
+      "enum": [
+        "investigation_service",
+        "user"
+      ]
+    },
+    "created_by_user_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "DRAFT",
+        "SUBMITTED",
+        "POLICY_EVALUATION",
+        "REJECTED",
+        "EXPIRED",
+        "APPROVAL_PENDING",
+        "APPROVED"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

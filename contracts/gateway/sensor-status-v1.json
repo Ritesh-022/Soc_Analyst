@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.ascense.example/contracts/gateway/sensor-status-v1.json",
+  "title": "Sensor Status v1",
+  "description": "Individual sensor availability and health.",
+  "type": "object",
+  "required": [
+    "name",
+    "instance_id",
+    "status"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "From the approved sensor allowlist"
+    },
+    "instance_id": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "HEALTHY",
+        "DEGRADED",
+        "SENSOR_FAILURE",
+        "UNKNOWN"
+      ]
+    },
+    "last_event_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "events_per_minute": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "error": {
+      "type": "string"
+    }
+  }
+}

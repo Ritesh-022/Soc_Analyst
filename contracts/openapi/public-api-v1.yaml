@@ -1,0 +1,1915 @@
+openapi: 3.2.1
+info:
+  title: Ascense Public API
+  version: 1.0.0
+  description: |
+    Customer-facing API for the web application and authorized platform clients.
+
+    All endpoints live under the `/api/v1/` namespace and require a Bearer token
+    (OIDC/JWT). The backend derives tenant context from the authenticated user
+    identity; the caller must not be able to change tenant ownership by changing
+    request JSON.
+
+    Conventions:
+      - JSON property names use `snake_case`.
+      - Date/time values are UTC, RFC 3339 (e.g. `2026-11-06T06:30:00Z`).
+      - Entity IDs are UUIDv7 strings (RFC 9562).
+      - Pagination is cursor-based: `limit` and `cursor` query params; responses
+        include `next_cursor` (null when no more results).
+      - Error responses use RFC 9457 Problem Details (`application/problem+json`).
+      - `trace_id` follows the W3C Trace Context spec (32-char lowercase hex).
+servers:
+  - url: https://api.ascense.example
+    description: Production API endpoint
+  - url: https://api.staging.ascense.example
+    description: Staging API endpoint
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/v1/me:
+    get:
+      tags: [Identity]
+      summary: Return current authenticated user and memberships
+      operationId: getCurrentUser
+      responses:
+        '200':
+          description: Current user and memberships.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentUser'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/tenants/current:
+    get:
+      tags: [Tenants]
+      summary: Get active tenant context
+      operationId: getCurrentTenant
+      responses:
+        '200':
+          description: Active tenant context.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tenant'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/tenants/current/memberships:
+    get:
+      tags: [Tenants]
+      summary: View tenant users and roles
+      operationId: listTenantMemberships
+      parameters:
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/CursorQuery'
+      responses:
+        '200':
+          description: Tenant users and their roles.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MembershipPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/gateways:
+    get:
+      tags: [Gateways]
+      summary: List authorized gateways
+      operationId: listGateways
+      parameters:
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/CursorQuery'
+      responses:
+        '200':
+          description: Authorized gateways for the current tenant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/gateways/enrollment-tokens:
+    post:
+      tags: [Gateways]
+      summary: Create gateway enrollment token
+      description: |
+        Creates a one-time enrollment token for registering a new gateway.
+        The token binds to the current tenant context.
+      operationId: createEnrollmentToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnrollmentTokenRequest'
+      responses:
+        '201':
+          description: Enrollment token created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnrollmentToken'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/gateways/{gateway_id}:
+    get:
+      tags: [Gateways]
+      summary: Gateway status and details
+      operationId: getGateway
+      parameters:
+        - $ref: '#/components/parameters/GatewayIdPath'
+      responses:
+        '200':
+          description: Gateway status and details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Gateway'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/gateways/{gateway_id}/sensors:
+    get:
+      tags: [Gateways]
+      summary: View installed and active sensors
+      operationId: listGatewaySensors
+      parameters:
+        - $ref: '#/components/parameters/GatewayIdPath'
+      responses:
+        '200':
+          description: Sensors installed on the gateway.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SensorStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/assets:
+    get:
+      tags: [Assets]
+      summary: List protected infrastructure
+      operationId: listAssets
+      parameters:
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/CursorQuery'
+      responses:
+        '200':
+          description: Protected assets for the current tenant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssetPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/assets/{asset_id}:
+    get:
+      tags: [Assets]
+      summary: View asset details and criticality
+      operationId: getAsset
+      parameters:
+        - $ref: '#/components/parameters/AssetIdPath'
+      responses:
+        '200':
+          description: Asset details and criticality.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Asset'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/events:
+    get:
+      tags: [Events]
+      summary: Search normalized events
+      description: |
+        Searches normalized event records. Uses cursor-based pagination.
+      operationId: listEvents
+      parameters:
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/CursorQuery'
+        - name: event_kind
+          in: query
+          description: Filter by canonical event kind.
+          schema:
+            type: string
+        - name: asset_id
+          in: query
+          description: Filter by affected asset.
+          schema:
+            type: string
+            format: uuid
+        - name: observed_from
+          in: query
+          description: Filter events observed on or after this time.
+          schema:
+            type: string
+            format: date-time
+        - name: observed_to
+          in: query
+          description: Filter events observed on or before this time.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Normalized events matching the query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/events/{event_id}:
+    get:
+      tags: [Events]
+      summary: Get event details
+      operationId: getEvent
+      parameters:
+        - $ref: '#/components/parameters/EventIdPath'
+      responses:
+        '200':
+          description: Event details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventRecord'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/alerts:
+    get:
+      tags: [Alerts]
+      summary: List alerts
+      operationId: listAlerts
+      parameters:
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/CursorQuery'
+        - name: status
+          in: query
+          description: Filter by alert status.
+          schema:
+            $ref: '#/components/schemas/AlertStatus'
+        - name: severity
+          in: query
+          description: Filter by severity.
+          schema:
+            $ref: '#/components/schemas/Severity'
+        - name: incident_id
+          in: query
+          description: Filter by incident.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Alerts matching the query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/alerts/{alert_id}:
+    get:
+      tags: [Alerts]
+      summary: Get alert and evidence references
+      operationId: getAlert
+      parameters:
+        - $ref: '#/components/parameters/AlertIdPath'
+      responses:
+        '200':
+          description: Alert details with evidence references.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/alerts/{alert_id}/acknowledgements:
+    post:
+      tags: [Alerts]
+      summary: Acknowledge an alert
+      description: |
+        Transitions an alert from `NEW` to `ACKNOWLEDGED`. Records the
+        acknowledging user and reason.
+      operationId: acknowledgeAlert
+      parameters:
+        - $ref: '#/components/parameters/AlertIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertAcknowledgementRequest'
+      responses:
+        '200':
+          description: Alert acknowledged.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Alert'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/incidents:
+    get:
+      tags: [Incidents]
+      summary: List incidents
+      operationId: listIncidents
+      parameters:
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/CursorQuery'
+        - name: status
+          in: query
+          description: Filter by incident status.
+          schema:
+            $ref: '#/components/schemas/IncidentStatus'
+        - name: severity
+          in: query
+          description: Filter by severity.
+          schema:
+            $ref: '#/components/schemas/Severity'
+      responses:
+        '200':
+          description: Incidents matching the query.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/incidents/{incident_id}:
+    get:
+      tags: [Incidents]
+      summary: Get incident details
+      operationId: getIncident
+      parameters:
+        - $ref: '#/components/parameters/IncidentIdPath'
+      responses:
+        '200':
+          description: Incident details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Incident'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/incidents/{incident_id}/transitions:
+    post:
+      tags: [Incidents]
+      summary: Move incident through state transition
+      description: |
+        Performs an authorized incident state transition. Each transition
+        records the actor, timestamp, and reason. A service may only perform
+        the transitions it owns.
+      operationId: transitionIncident
+      parameters:
+        - $ref: '#/components/parameters/IncidentIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IncidentTransitionRequest'
+      responses:
+        '200':
+          description: Incident after the transition.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Incident'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/incidents/{incident_id}/investigations:
+    post:
+      tags: [Investigations]
+      summary: Request an investigation
+      description: |
+        Requests an investigation run for the incident. The investigation
+        service assembles evidence and produces an explanation.
+      operationId: requestInvestigation
+      parameters:
+        - $ref: '#/components/parameters/IncidentIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvestigationRequest'
+      responses:
+        '202':
+          description: Investigation request accepted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Investigation'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/investigations/{investigation_id}:
+    get:
+      tags: [Investigations]
+      summary: Get investigation result
+      operationId: getInvestigation
+      parameters:
+        - $ref: '#/components/parameters/InvestigationIdPath'
+      responses:
+        '200':
+          description: Investigation result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvestigationResult'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/investigations/{investigation_id}/cancellations:
+    post:
+      tags: [Investigations]
+      summary: Stop investigation
+      description: Requests cancellation of an in-progress investigation run.
+      operationId: cancelInvestigation
+      parameters:
+        - $ref: '#/components/parameters/InvestigationIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvestigationCancellationRequest'
+      responses:
+        '202':
+          description: Cancellation request accepted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Investigation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/evidence/{evidence_id}:
+    get:
+      tags: [Evidence]
+      summary: Retrieve evidence metadata
+      description: |
+        Retrieves authorized evidence metadata. An AI explanation is not itself
+        evidence; this returns traceable evidence records with storage
+        references.
+      operationId: getEvidence
+      parameters:
+        - $ref: '#/components/parameters/EvidenceIdPath'
+      responses:
+        '200':
+          description: Evidence metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Evidence'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/incidents/{incident_id}/action-proposals:
+    get:
+      tags: [Proposals]
+      summary: List proposed responses
+      operationId: listActionProposals
+      parameters:
+        - $ref: '#/components/parameters/IncidentIdPath'
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/CursorQuery'
+      responses:
+        '200':
+          description: Proposed responses for the incident.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionProposalPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    post:
+      tags: [Proposals]
+      summary: Create proposal
+      description: |
+        Creates an action proposal through an authorized workflow. A proposal
+        is not a command. The policy engine validates the actual target and
+        parameters against an allowlisted action schema. An AI agent must not
+        choose arbitrary command strings, shell scripts, or firewall
+        expressions.
+
+        AI-generated action proposals are created through the investigation
+        workflow or a restricted internal interface, not directly by the
+        customer.
+      operationId: createActionProposal
+      parameters:
+        - $ref: '#/components/parameters/IncidentIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActionProposalCreateRequest'
+      responses:
+        '201':
+          description: Proposal created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActionProposal'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/action-proposals/{proposal_id}/approvals:
+    post:
+      tags: [Proposals]
+      summary: Approve or reject proposal
+      description: |
+        Records a human authorization decision for a proposal. Approval
+        requests must record: approving user identity, role, decision, reason,
+        time, proposal version, and approval expiry. Do not accept
+        `{ "approved": true }` alone.
+
+        A user must not approve their own high-impact proposal. Critical
+        actions may require a second authorized approver. Approval has an
+        explicit expiry and supports revocation.
+      operationId: approveOrRejectProposal
+      parameters:
+        - $ref: '#/components/parameters/ProposalIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequest'
+      responses:
+        '201':
+          description: Approval decision recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Approval'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/commands/{command_id}:
+    get:
+      tags: [Commands]
+      summary: View command lifecycle and result
+      description: |
+        Views the lifecycle of an authorized, signed command and its execution
+        result. `DISPATCHED` is recorded as a timestamped audit event, not as
+        a command lifecycle state.
+      operationId: getCommand
+      parameters:
+        - $ref: '#/components/parameters/CommandIdPath'
+      responses:
+        '200':
+          description: Command lifecycle and result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Command'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/action-proposals/{proposal_id}/executions:
+    get:
+      tags: [Proposals]
+      summary: View execution results
+      description: |
+        Views the execution results for commands originating from a proposal.
+        Execution status and verification status are separate fields.
+      operationId: listProposalExecutions
+      parameters:
+        - $ref: '#/components/parameters/ProposalIdPath'
+      responses:
+        '200':
+          description: Execution results for the proposal.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ExecutionAttempt'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/policies:
+    get:
+      tags: [Policies]
+      summary: View effective security policies
+      operationId: listPolicies
+      responses:
+        '200':
+          description: Effective security policies for the current tenant.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Policy'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/detectors:
+    get:
+      tags: [Detectors]
+      summary: View available detector versions and health
+      operationId: listDetectors
+      responses:
+        '200':
+          description: Available detector versions and health.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Detector'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/audit-events:
+    get:
+      tags: [Audit]
+      summary: View authorized audit history
+      description: |
+        Views authorized audit history for the current tenant. Audit records
+        are security-relevant activity records.
+      operationId: listAuditEvents
+      parameters:
+        - $ref: '#/components/parameters/LimitQuery'
+        - $ref: '#/components/parameters/CursorQuery'
+        - name: actor_id
+          in: query
+          description: Filter by actor (user or service).
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          description: Filter events on or after this time.
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: Filter events on or before this time.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Authorized audit history.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEventPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Bearer token authentication using OIDC-issued JWTs. The backend derives
+        tenant context from the authenticated user identity and maintains a
+        mapping between the internal `user_id` and the external identity's
+        issuer and subject claim.
+
+  parameters:
+    LimitQuery:
+      name: limit
+      in: query
+      description: Maximum number of results to return.
+      required: false
+      schema:
+        type: integer
+        format: int32
+        minimum: 1
+        maximum: 200
+        default: 50
+    CursorQuery:
+      name: cursor
+      in: query
+      description: Opaque pagination cursor returned by a previous response.
+      required: false
+      schema:
+        type: string
+    GatewayIdPath:
+      name: gateway_id
+      in: path
+      required: true
+      description: UUIDv7 identifier of the gateway.
+      schema:
+        type: string
+        format: uuid
+    AssetIdPath:
+      name: asset_id
+      in: path
+      required: true
+      description: UUIDv7 identifier of the asset.
+      schema:
+        type: string
+        format: uuid
+    EventIdPath:
+      name: event_id
+      in: path
+      required: true
+      description: UUIDv7 identifier of the event.
+      schema:
+        type: string
+        format: uuid
+    AlertIdPath:
+      name: alert_id
+      in: path
+      required: true
+      description: UUIDv7 identifier of the alert.
+      schema:
+        type: string
+        format: uuid
+    IncidentIdPath:
+      name: incident_id
+      in: path
+      required: true
+      description: UUIDv7 identifier of the incident.
+      schema:
+        type: string
+        format: uuid
+    InvestigationIdPath:
+      name: investigation_id
+      in: path
+      required: true
+      description: UUIDv7 identifier of the investigation.
+      schema:
+        type: string
+        format: uuid
+    EvidenceIdPath:
+      name: evidence_id
+      in: path
+      required: true
+      description: UUIDv7 identifier of the evidence.
+      schema:
+        type: string
+        format: uuid
+    ProposalIdPath:
+      name: proposal_id
+      in: path
+      required: true
+      description: UUIDv7 identifier of the proposal.
+      schema:
+        type: string
+        format: uuid
+    CommandIdPath:
+      name: command_id
+      in: path
+      required: true
+      description: UUIDv7 identifier of the command.
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: The request was malformed or failed validation.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: The request was not authenticated.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: The authenticated user is not authorized for this resource.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: The requested resource was not found.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: The request conflicts with the current state of the resource.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+
+  schemas:
+    Problem:
+      description: RFC 9457 Problem Details object.
+      type: object
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+        status:
+          type: integer
+          format: int32
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri-reference
+        trace_id:
+          type: string
+          pattern: '^[0-9a-f]{32}$'
+          description: W3C Trace Context trace identifier.
+        request_id:
+          type: string
+          description: UUIDv7 request identifier.
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              code:
+                type: string
+              message:
+                type: string
+
+    Severity:
+      type: string
+      enum: [low, medium, high, critical]
+      description: Categorical business priority.
+
+    AlertStatus:
+      type: string
+      enum: [NEW, ACKNOWLEDGED, UNDER_INVESTIGATION, RESOLVED, FALSE_POSITIVE]
+      description: Alert lifecycle status.
+
+    IncidentStatus:
+      type: string
+      enum:
+        - OPEN
+        - TRIAGED
+        - INVESTIGATING
+        - CONTAINMENT_IN_PROGRESS
+        - CONTAINED
+        - RECOVERING
+        - RESOLVED
+        - CLOSED
+      description: Incident lifecycle status.
+
+    ExecutionStatus:
+      type: string
+      enum: [NOT_STARTED, RUNNING, SUCCEEDED, FAILED, PARTIALLY_SUCCEEDED, UNKNOWN, ROLLBACK_PENDING, ROLLED_BACK, ROLLBACK_FAILED]
+      description: What the gateway did.
+
+    VerificationStatus:
+      type: string
+      enum: [PENDING, VERIFIED, NOT_VERIFIED, UNKNOWN]
+      description: Independent confirmation that the intended enforcement state exists.
+
+    CommandStatus:
+      type: string
+      enum: [QUEUED, LEASED, ACKNOWLEDGED, EXPIRED, CANCELLED]
+      description: Command lifecycle status.
+
+    ProposalStatus:
+      type: string
+      enum: [DRAFT, SUBMITTED, POLICY_EVALUATION, REJECTED, EXPIRED, APPROVAL_PENDING, APPROVED]
+      description: Proposal lifecycle status.
+
+    ApprovalStatus:
+      type: string
+      enum: [PENDING, APPROVED, REJECTED, EXPIRED, REVOKED]
+      description: Approval lifecycle status.
+
+    InvestigationStatus:
+      type: string
+      enum: [PENDING, RUNNING, COMPLETED, CANCELLED, FAILED]
+      description: Investigation run status.
+
+    PageMeta:
+      type: object
+      properties:
+        next_cursor:
+          type: string
+          nullable: true
+          description: Cursor for the next page of results. Null when no more results.
+
+    CurrentUser:
+      type: object
+      required: [user_id, memberships]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          description: Internal UUIDv7 user identity mapped from the external IdP.
+        display_name:
+          type: string
+        email:
+          type: string
+          format: email
+        issuer:
+          type: string
+          description: External identity provider issuer.
+        subject:
+          type: string
+          description: Subject claim from the external identity provider.
+        memberships:
+          type: array
+          items:
+            $ref: '#/components/schemas/Membership'
+
+    Membership:
+      type: object
+      required: [tenant_id, role]
+      properties:
+        tenant_id:
+          type: string
+          format: uuid
+        tenant_name:
+          type: string
+        role:
+          type: string
+          description: Role assigned to the user within the tenant.
+
+    MembershipPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Membership'
+        next_cursor:
+          type: string
+          nullable: true
+
+    Tenant:
+      type: object
+      required: [tenant_id, name]
+      properties:
+        tenant_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    Gateway:
+      type: object
+      required: [gateway_id, tenant_id, status]
+      properties:
+        gateway_id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          type: string
+          enum: [ONLINE, OFFLINE, DEGRADED, UNKNOWN]
+        registered_at:
+          type: string
+          format: date-time
+        last_heartbeat_at:
+          type: string
+          format: date-time
+        config_version:
+          type: integer
+          format: int64
+
+    GatewayPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Gateway'
+        next_cursor:
+          type: string
+          nullable: true
+
+    SensorStatus:
+      type: object
+      required: [name, instance_id, status]
+      properties:
+        name:
+          type: string
+          description: Sensor identifier from the approved allowlist.
+        instance_id:
+          type: string
+        version:
+          type: string
+        status:
+          type: string
+          enum: [HEALTHY, DEGRADED, FAILED, UNKNOWN]
+        last_event_at:
+          type: string
+          format: date-time
+
+    EnrollmentTokenRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Display name for the gateway to be enrolled.
+        expires_in_seconds:
+          type: integer
+          format: int64
+          description: Token validity duration in seconds.
+
+    EnrollmentToken:
+      type: object
+      required: [token, gateway_id, expires_at]
+      properties:
+        token:
+          type: string
+          description: One-time enrollment token.
+        gateway_id:
+          type: string
+          format: uuid
+          description: UUIDv7 identifier pre-allocated for the new gateway.
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    Asset:
+      type: object
+      required: [asset_id, tenant_id, criticality]
+      properties:
+        asset_id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        hostname:
+          type: string
+        ip_address:
+          type: string
+          description: Primary IP address.
+        criticality:
+          type: string
+          enum: [LOW, MEDIUM, HIGH, CRITICAL]
+          description: Business criticality of the protected asset.
+        asset_type:
+          type: string
+          description: Asset type (e.g. server, service, device).
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AssetPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Asset'
+        next_cursor:
+          type: string
+          nullable: true
+
+    EventRecord:
+      type: object
+      required: [event_id, tenant_id, event_kind, observed_at]
+      properties:
+        event_id:
+          type: string
+          format: uuid
+          description: Ascense normalized event record identifier.
+        tenant_id:
+          type: string
+          format: uuid
+        source_event_id:
+          type: string
+          description: Original sensor-assigned identifier, preserved from source.
+        gateway_id:
+          type: string
+          format: uuid
+        event_kind:
+          type: string
+        sensor_name:
+          type: string
+        sensor_instance_id:
+          type: string
+        asset_resolution:
+          type: object
+          properties:
+            status:
+              type: string
+              enum: [RESOLVED, UNRESOLVED, AMBIGUOUS, STALE_MAPPING]
+            source_asset_id:
+              type: string
+              format: uuid
+              nullable: true
+            destination_asset_id:
+              type: string
+              format: uuid
+              nullable: true
+        observed_at:
+          type: string
+          format: date-time
+        ingested_at:
+          type: string
+          format: date-time
+        data:
+          type: object
+          additionalProperties: true
+          description: Event-specific payload.
+
+    EventPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventRecord'
+        next_cursor:
+          type: string
+          nullable: true
+
+    Alert:
+      type: object
+      required: [alert_id, tenant_id, alert_type, severity, status]
+      properties:
+        alert_id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        incident_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Incident this alert belongs to, if promoted.
+        alert_type:
+          type: string
+        severity:
+          $ref: '#/components/schemas/Severity'
+        risk_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Integer 0-100 used for ranking and policy thresholds.
+        status:
+          $ref: '#/components/schemas/AlertStatus'
+        detection_finding_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        event_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        evidence_ids:
+          type: array
+          description: References to retrievable, authorized evidence records.
+          items:
+            type: string
+            format: uuid
+        affected_asset_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        summary:
+          type: string
+        observed_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    AlertPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Alert'
+        next_cursor:
+          type: string
+          nullable: true
+
+    AlertAcknowledgementRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          description: Reason for acknowledging the alert.
+
+    Incident:
+      type: object
+      required: [incident_id, tenant_id, status]
+      properties:
+        incident_id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        severity:
+          $ref: '#/components/schemas/Severity'
+        status:
+          $ref: '#/components/schemas/IncidentStatus'
+        alert_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        affected_asset_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        evidence_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        summary:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    IncidentPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Incident'
+        next_cursor:
+          type: string
+          nullable: true
+
+    IncidentTransitionRequest:
+      type: object
+      required: [target_status, reason]
+      properties:
+        target_status:
+          $ref: '#/components/schemas/IncidentStatus'
+        reason:
+          type: string
+          description: Reason for the transition.
+
+    InvestigationRequest:
+      type: object
+      properties:
+        scope:
+          type: string
+          description: Optional scope or focus for the investigation.
+        reason:
+          type: string
+
+    Investigation:
+      type: object
+      required: [investigation_id, incident_id, status]
+      properties:
+        investigation_id:
+          type: string
+          format: uuid
+        incident_id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/InvestigationStatus'
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    InvestigationResult:
+      type: object
+      required: [investigation_id, incident_id, status]
+      properties:
+        investigation_id:
+          type: string
+          format: uuid
+        incident_id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/InvestigationStatus'
+        summary:
+          type: string
+        assessment:
+          type: object
+          properties:
+            classification:
+              type: string
+            confidence:
+              type: number
+              format: float
+              minimum: 0
+              maximum: 1
+              description: Float 0-1 expressing model or detector confidence.
+            uncertainties:
+              type: array
+              items:
+                type: string
+        evidence:
+          type: array
+          description: |
+            References to real, retrievable, authorized evidence records.
+            An AI explanation is not itself evidence.
+          items:
+            type: object
+            properties:
+              evidence_id:
+                type: string
+                format: uuid
+              event_id:
+                type: string
+                format: uuid
+              supports:
+                type: string
+                description: How this evidence supports the assessment.
+        recommendations:
+          type: array
+          items:
+            $ref: '#/components/schemas/InvestigationRecommendation'
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    InvestigationRecommendation:
+      type: object
+      properties:
+        action_type:
+          type: string
+        target:
+          $ref: '#/components/schemas/ActionTarget'
+        affected_asset_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        requires_approval:
+          type: boolean
+
+    InvestigationCancellationRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+
+    Evidence:
+      type: object
+      required: [evidence_id, tenant_id]
+      properties:
+        evidence_id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        event_id:
+          type: string
+          format: uuid
+          nullable: true
+        evidence_type:
+          type: string
+          description: Type of evidence (e.g. network_capture, log_entry, packet).
+        storage_reference:
+          type: string
+          description: Reference to the stored evidence (e.g. object storage URI).
+        description:
+          type: string
+        collected_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    ActionTarget:
+      description: |
+        Typed enforcement target. The enforcement target and the affected asset
+        are different things and must be kept separate.
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [network_indicator, asset, domain_indicator]
+          description: |
+            `network_indicator` for IP/CIDR/domain indicators; `asset` for
+            isolating a protected host.
+        address:
+          type: string
+          description: IP, CIDR, or domain depending on kind.
+        direction:
+          type: string
+          enum: [egress, ingress, both]
+        gateway_id:
+          type: string
+          format: uuid
+        protocol:
+          type: string
+        ports:
+          type: array
+          items:
+            type: integer
+            format: int32
+            minimum: 0
+            maximum: 65535
+        asset_id:
+          type: string
+          format: uuid
+          description: UUIDv7 asset identifier when kind is `asset`.
+
+    ActionProposalCreateRequest:
+      type: object
+      required: [action_type, target, reason]
+      properties:
+        action_type:
+          type: string
+          description: Allowlisted action type (e.g. `block_network_indicator`, `isolate_asset`).
+        target:
+          $ref: '#/components/schemas/ActionTarget'
+        parameters:
+          type: object
+          additionalProperties: true
+          description: Typed action parameters validated against the allowlisted action schema.
+        affected_asset_ids:
+          type: array
+          description: Protected assets whose security posture is being changed.
+          items:
+            type: string
+            format: uuid
+        reason:
+          type: string
+          description: Justification linked to evidence.
+        evidence_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    ActionProposal:
+      type: object
+      required: [proposal_id, tenant_id, incident_id, action_type, target, status]
+      properties:
+        proposal_id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        incident_id:
+          type: string
+          format: uuid
+        action_type:
+          type: string
+        target:
+          $ref: '#/components/schemas/ActionTarget'
+        affected_asset_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        parameters:
+          type: object
+          additionalProperties: true
+        reason:
+          type: string
+        evidence_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        policy_version_id:
+          type: string
+          format: uuid
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/ProposalStatus'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ActionProposalPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActionProposal'
+        next_cursor:
+          type: string
+          nullable: true
+
+    ApprovalRequest:
+      type: object
+      required: [decision, reason, proposal_version]
+      description: |
+        Approval requests must record: approving user identity, role, decision,
+        reason, time, proposal version, and approval expiry. Do not accept
+        `{ "approved": true }` alone.
+      properties:
+        decision:
+          type: string
+          enum: [APPROVED, REJECTED]
+        reason:
+          type: string
+          description: Reason for the decision.
+        proposal_version:
+          type: string
+          description: Version of the proposal being approved or rejected.
+
+    Approval:
+      type: object
+      required: [approval_id, proposal_id, decision]
+      properties:
+        approval_id:
+          type: string
+          format: uuid
+        proposal_id:
+          type: string
+          format: uuid
+        decision:
+          type: string
+          enum: [APPROVED, REJECTED]
+        reason:
+          type: string
+        approver_id:
+          type: string
+          format: uuid
+          description: UUIDv7 identifier of the approving user.
+        approver_role:
+          type: string
+        proposal_version:
+          type: string
+        status:
+          $ref: '#/components/schemas/ApprovalStatus'
+        expires_at:
+          type: string
+          format: date-time
+          description: Approval expiry timestamp.
+        created_at:
+          type: string
+          format: date-time
+
+    Command:
+      type: object
+      required: [command_id, tenant_id, gateway_id, action_type, target, status]
+      properties:
+        command_id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        gateway_id:
+          type: string
+          format: uuid
+        action_type:
+          type: string
+        target:
+          $ref: '#/components/schemas/ActionTarget'
+        parameters:
+          type: object
+          additionalProperties: true
+        proposal_id:
+          type: string
+          format: uuid
+        approval_id:
+          type: string
+          format: uuid
+        policy_version_id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/CommandStatus'
+        nonce:
+          type: string
+        idempotency_key:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+        execution_attempts:
+          type: array
+          description: Execution attempts for this command.
+          items:
+            $ref: '#/components/schemas/ExecutionAttempt'
+
+    ExecutionAttempt:
+      type: object
+      required: [execution_attempt_id, execution_status, verification_status]
+      properties:
+        execution_attempt_id:
+          type: string
+          format: uuid
+        execution_status:
+          $ref: '#/components/schemas/ExecutionStatus'
+        verification_status:
+          $ref: '#/components/schemas/VerificationStatus'
+        observed_enforcement_state:
+          type: object
+          nullable: true
+          additionalProperties: true
+        result_reference:
+          type: string
+          nullable: true
+        received_at:
+          type: string
+          format: date-time
+        execution_started_at:
+          type: string
+          format: date-time
+          nullable: true
+        execution_completed_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    Policy:
+      type: object
+      required: [policy_version_id, tenant_id]
+      properties:
+        policy_version_id:
+          type: string
+          format: uuid
+          description: UUIDv7 identifier of this immutable policy revision.
+        tenant_id:
+          type: string
+          format: uuid
+        description:
+          type: string
+        rules:
+          type: array
+          description: Policy rules in effect.
+          items:
+            type: object
+            properties:
+              rule_id:
+                type: string
+              action_type:
+                type: string
+              decision:
+                type: string
+                enum: [ALLOW, DENY, REQUIRE_APPROVAL]
+              conditions:
+                type: object
+                additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+
+    Detector:
+      type: object
+      required: [detector_id, detector_version, health]
+      properties:
+        detector_id:
+          type: string
+          description: Detector identifier (e.g. `network_anomaly_v1`).
+        detector_version:
+          type: string
+          description: Detector version (e.g. `1.2.0`).
+        detector_type:
+          type: string
+          enum: [RULE, ML]
+          description: Whether the detector is rule-based or ML-based.
+        rule_version:
+          type: string
+          nullable: true
+          description: Populated for rule-based detectors; null for ML-based.
+        model_version_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Populated for ML-based detectors; null for rule-based.
+        feature_schema_version:
+          type: string
+        health:
+          type: string
+          enum: [HEALTHY, DEGRADED, FAILED]
+        last_evaluated_at:
+          type: string
+          format: date-time
+
+    AuditEvent:
+      type: object
+      required: [audit_event_id, tenant_id, action, actor_id, occurred_at]
+      properties:
+        audit_event_id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        action:
+          type: string
+          description: Security-relevant action (e.g. `command.dispatched`, `alert.acknowledged`).
+        actor_id:
+          type: string
+          format: uuid
+          description: UUIDv7 identifier of the user or service that performed the action.
+        actor_type:
+          type: string
+          enum: [USER, SERVICE]
+        target_type:
+          type: string
+          description: Type of object acted upon (e.g. `command`, `incident`).
+        target_id:
+          type: string
+          format: uuid
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+        occurred_at:
+          type: string
+          format: date-time
+        trace_id:
+          type: string
+          pattern: '^[0-9a-f]{32}$'
+          nullable: true
+
+    AuditEventPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditEvent'
+        next_cursor:
+          type: string
+          nullable: true

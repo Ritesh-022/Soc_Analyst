@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.ascense.example/contracts/events/network-connection-v1.json",
+  "title": "Network Connection Event Payload v1",
+  "description": "Canonical network connection event payload (data field in CloudEvents envelope).",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "source_event_id",
+    "event_kind",
+    "sensor",
+    "asset_resolution"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "default": "1.0"
+    },
+    "source_event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "event_kind": {
+      "type": "string",
+      "enum": [
+        "network.connection"
+      ]
+    },
+    "sensor": {
+      "type": "object",
+      "required": [
+        "name",
+        "instance_id"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "instance_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "asset_resolution": {
+      "type": "object",
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "RESOLVED",
+            "UNRESOLVED",
+            "AMBIGUOUS",
+            "STALE_MAPPING"
+          ]
+        },
+        "source_asset_id": {
+          "type": ["string", "null"],
+          "format": "uuid"
+        },
+        "destination_asset_id": {
+          "type": ["string", "null"],
+          "format": "uuid"
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "required": [
+        "source_ip",
+        "destination_ip",
+        "transport"
+      ],
+      "properties": {
+        "source_ip": {
+          "type": "string"
+        },
+        "source_port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "destination_ip": {
+          "type": "string"
+        },
+        "destination_port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "transport": {
+          "type": "string",
+          "enum": [
+            "tcp",
+            "udp",
+            "icmp"
+          ]
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "inbound",
+            "outbound",
+            "internal",
+            "unknown"
+          ]
+        },
+        "bytes_sent": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bytes_received": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

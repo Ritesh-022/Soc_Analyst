@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.ascense.example/contracts/common/telemetry-health-v1.json",
+  "title": "Telemetry Health v1",
+  "description": "Detection visibility and sensor health.",
+  "type": "object",
+  "required": [
+    "gateway_id",
+    "overall_status",
+    "last_heartbeat_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "gateway_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "overall_status": {
+      "type": "string",
+      "enum": [
+        "HEALTHY",
+        "DEGRADED",
+        "DISCONNECTED",
+        "SENSOR_FAILURE",
+        "TELEMETRY_STALE",
+        "UNKNOWN"
+      ]
+    },
+    "sensors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "instance_id",
+          "status"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "HEALTHY",
+              "SENSOR_FAILURE",
+              "UNKNOWN"
+            ]
+          },
+          "last_event_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "events_received": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "last_heartbeat_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "last_event_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "events_received_window": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ingestion_delay_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "rejection_rate": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    }
+  }
+}

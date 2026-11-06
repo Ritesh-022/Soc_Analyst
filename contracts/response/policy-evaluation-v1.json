@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.ascense.example/contracts/response/policy-evaluation-v1.json",
+  "title": "Policy Evaluation v1",
+  "description": "Result of evaluating an action proposal against deterministic security policies.",
+  "type": "object",
+  "required": [
+    "decision",
+    "policy_version_id"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "decision": {
+      "type": "string",
+      "enum": [
+        "ALLOW",
+        "DENY",
+        "REQUIRE_APPROVAL"
+      ]
+    },
+    "policy_version_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "matched_rule_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "approval_required": {
+      "type": "boolean"
+    },
+    "approval_requirements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "approver_role": {
+            "type": "string"
+          },
+          "min_approvers": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "cannot_self_approve": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

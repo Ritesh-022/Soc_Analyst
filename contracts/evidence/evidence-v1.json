@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.ascense.example/contracts/evidence/evidence-v1.json",
+  "title": "Evidence v1",
+  "description": "Traceable evidence record and storage reference. An AI explanation is not itself evidence.",
+  "type": "object",
+  "required": [
+    "evidence_id",
+    "tenant_id",
+    "evidence_type",
+    "collected_at",
+    "created_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "evidence_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "evidence_type": {
+      "type": "string",
+      "enum": [
+        "network_capture",
+        "log_entry",
+        "packet",
+        "flow_record",
+        "alert_reference"
+      ]
+    },
+    "storage_reference": {
+      "type": "string",
+      "description": "Reference to stored evidence (e.g. object storage URI)"
+    },
+    "description": {
+      "type": "string"
+    },
+    "collected_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

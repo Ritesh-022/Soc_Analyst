@@ -1,0 +1,904 @@
+openapi: 3.2.1
+info:
+  title: Ascense Internal Service API
+  version: 1.0.0
+  description: |
+    Internal service API for trusted backend workers only.
+
+    All endpoints live under the `/internal/v1/` namespace and are never exposed
+    as customer endpoints. These endpoints use service authentication and
+    least-privilege workload identities. Do not use a shared internal API key
+    distributed to every worker.
+
+    Each endpoint is owned by a specific module. A service may only perform the
+    transitions it owns:
+
+      - POST `/internal/v1/detection/evaluate` — Detection owner
+      - POST `/internal/v1/incidents/{incident_id}/investigate` — Investigation owner
+      - POST `/internal/v1/policy/evaluate` — Policy owner
+      - POST `/internal/v1/commands` — Response owner (creates authorized, signed commands)
+      - POST `/internal/v1/commands/{command_id}/verify` — Response owner (verification service)
+      - POST `/internal/v1/audit-events` — Platform owner
+
+    Conventions:
+      - JSON property names use `snake_case`.
+      - Date/time values are UTC, RFC 3339 (e.g. `2026-11-06T06:30:00Z`).
+      - Entity IDs are UUIDv7 strings (RFC 9562).
+      - Error responses use RFC 9457 Problem Details (`application/problem+json`).
+      - `trace_id` follows the W3C Trace Context spec (32-char lowercase hex).
+
+    Security note: these endpoints are internal-only. They are not reachable
+    from the public internet and require authenticated service-to-service
+    credentials. Access is enforced by network policy and per-service
+    workload identity, not a shared secret.
+servers:
+  - url: https://internal.ascense.example
+    description: Internal service mesh endpoint
+
+security:
+  - internalServiceAuth: []
+
+paths:
+  /internal/v1/detection/evaluate:
+    post:
+      tags: [Detection]
+      summary: Evaluate an event or event batch
+      description: |
+        Owned by the Detection layer. Evaluates one or more normalized events
+        against detectors (rules or ML models) and produces detection findings.
+
+        A detection engine creates a `detection_finding_id`. It does not
+        independently decide that a customer-facing incident exists. The
+        correlation service promotes findings into alerts and groups alerts
+        into incidents.
+      operationId: evaluateDetection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DetectionEvaluationRequest'
+      responses:
+        '200':
+          description: Evaluation completed; returns detection findings.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetectionEvaluationResponse'
+        '202':
+          description: Evaluation accepted for asynchronous processing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetectionEvaluationAccepted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /internal/v1/incidents/{incident_id}/investigate:
+    post:
+      tags: [Investigation]
+      summary: Start investigation run
+      description: |
+        Owned by the Investigation layer. Starts an investigation run for the
+        specified incident. The investigation service assembles evidence and
+        produces an explanation using read-only tools and AI.
+
+        An AI investigation worker cannot set execution status or verification
+        status. Only the gateway sets execution status; only the response
+        verification service sets verification status.
+      operationId: startInvestigation
+      parameters:
+        - $ref: '#/components/parameters/IncidentIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InvestigationStartRequest'
+      responses:
+        '202':
+          description: Investigation run accepted and started.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvestigationStartResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /internal/v1/policy/evaluate:
+    post:
+      tags: [Policy]
+      summary: Evaluate an action proposal
+      description: |
+        Owned by the Policy layer. Evaluates an action proposal against the
+        effective security policy and returns a decision: `ALLOW`, `DENY`, or
+        `REQUIRE_APPROVAL`.
+
+        The policy engine validates the actual target and parameters against
+        an allowlisted action schema. An AI agent must not choose arbitrary
+        command strings, shell scripts, or firewall expressions.
+      operationId: evaluatePolicy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PolicyEvaluationRequest'
+      responses:
+        '200':
+          description: Policy evaluation result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicyEvaluationResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /internal/v1/commands:
+    post:
+      tags: [Response]
+      summary: Create authorized, signed command
+      description: |
+        Owned by the Response service. Creates an authorized, signed command
+        from an approved proposal. A command transitions to `QUEUED` upon
+        creation.
+
+        A signed command binds all of the following:
+          - `command_id` — unique identifier
+          - `tenant_id` and `gateway_id` — exact identities
+          - `target` — exact typed target (same structure as proposal)
+          - `action_type` and `parameters` — exact action
+          - `proposal_id` and `approval_id` — authorization chain
+          - `policy_version_id` — policy version used at authorization time
+          - `created_at` and `expires_at` — short expiry window
+          - `nonce` — unique per command to prevent replay
+          - `idempotency_key`
+          - Cryptographic signature verifiable by the gateway
+
+        `DISPATCHED` is recorded as a timestamped audit event when the
+        dispatcher places the command in the gateway's outbound queue. It is
+        not a command lifecycle state.
+      operationId: createCommand
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCommandRequest'
+      responses:
+        '201':
+          description: Command created and queued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Command'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /internal/v1/commands/{command_id}/verify:
+    post:
+      tags: [Response]
+      summary: Verify execution state
+      description: |
+        Owned by the Response verification service. Performs an independent
+        read-back to confirm the intended enforcement state exists and sets the
+        verification status.
+
+        Verification status tracks independent confirmation that the intended
+        enforcement state exists. It is separate from execution status. Only
+        the response verification service sets verification status — an AI
+        investigation worker cannot set it.
+
+          - `VERIFIED` — read-back confirmed the enforcement state is in effect
+          - `NOT_VERIFIED` — read-back confirmed the enforcement state is not in effect
+          - `UNKNOWN` — verification could not be completed (e.g. firewall unreachable)
+
+        A gateway reporting `execution_status: SUCCEEDED` does not imply
+        `verification_status: VERIFIED`. If the enforcement state is unknown
+        after a timeout, record `UNKNOWN` and escalate — do not claim success.
+      operationId: verifyCommand
+      parameters:
+        - $ref: '#/components/parameters/CommandIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyCommandRequest'
+      responses:
+        '200':
+          description: Verification result recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifyCommandResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /internal/v1/audit-events:
+    post:
+      tags: [Platform]
+      summary: Append service audit record
+      description: |
+        Owned by the Platform layer. Appends a security-relevant activity
+        record to the audit trail. Audit events record who did what, when,
+        and why.
+
+        `DISPATCHED` is recorded as a timestamped audit event when the
+        dispatcher places a command in the gateway's outbound queue — it is
+        not a command lifecycle state.
+      operationId: appendAuditEvent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuditEventAppendRequest'
+      responses:
+        '201':
+          description: Audit record appended.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditEventAppendResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+components:
+  securitySchemes:
+    internalServiceAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Internal service-to-service authentication. These endpoints are
+        internal-only and never exposed publicly. They are not reachable from
+        the public internet.
+
+        Authentication uses per-service workload identities with least
+        privilege — each service presents its own short-lived credential
+        (e.g. SPIFFE/SPIRE workload identity or mTLS with per-service
+        certificates) that grants access only to the endpoints it is authorized
+        to call. Do not use a shared internal API key distributed to every
+        worker.
+
+        Network policy enforcement ensures these endpoints are only
+        reachable from within the trusted service mesh.
+
+  parameters:
+    IncidentIdPath:
+      name: incident_id
+      in: path
+      required: true
+      description: UUIDv7 identifier of the incident.
+      schema:
+        type: string
+        format: uuid
+    CommandIdPath:
+      name: command_id
+      in: path
+      required: true
+      description: UUIDv7 identifier of the command.
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    BadRequest:
+      description: The request was malformed or failed validation.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: The calling service was not authenticated.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: The calling service is not authorized for this operation.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: The requested resource was not found.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: The request conflicts with the current state of the resource.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+
+  schemas:
+    Problem:
+      description: RFC 9457 Problem Details object.
+      type: object
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+        status:
+          type: integer
+          format: int32
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri-reference
+        trace_id:
+          type: string
+          pattern: '^[0-9a-f]{32}$'
+          description: W3C Trace Context trace identifier.
+        request_id:
+          type: string
+          description: UUIDv7 request identifier.
+
+    Severity:
+      type: string
+      enum: [low, medium, high, critical]
+      description: Categorical business priority.
+
+    DetectionEvaluationRequest:
+      description: |
+        Request to evaluate one or more normalized events against detectors.
+      type: object
+      required: [event_ids]
+      properties:
+        event_ids:
+          type: array
+          minItems: 1
+          description: UUIDv7 identifiers of the normalized events to evaluate.
+          items:
+            type: string
+            format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+          description: UUIDv7 tenant context derived from the events.
+        detector_ids:
+          type: array
+          description: |
+            Optional list of specific detector IDs to run. If omitted, all
+            applicable detectors are evaluated.
+          items:
+            type: string
+
+    DetectionFinding:
+      description: |
+        Output from one detector run. For rule-based detections,
+        `model_version_id` is null and `rule_version` is populated. For
+        ML-based detections, `rule_version` is null and `model_version_id` is
+        populated. Corresponds to `detection-finding-v1.json`.
+      type: object
+      required:
+        - detection_finding_id
+        - tenant_id
+        - event_ids
+        - detector_id
+        - detector_version
+        - finding_type
+        - severity
+        - observed_at
+      properties:
+        detection_finding_id:
+          type: string
+          format: uuid
+          description: UUIDv7 identifier of this finding.
+        tenant_id:
+          type: string
+          format: uuid
+        event_ids:
+          type: array
+          description: Event IDs that triggered this finding.
+          items:
+            type: string
+            format: uuid
+        detector_id:
+          type: string
+          description: Detector identifier (e.g. `network_anomaly_v1`).
+        detector_version:
+          type: string
+          description: Detector version (e.g. `1.2.0`).
+        model_version_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Populated for ML-based detectors; null for rule-based.
+        rule_version:
+          type: string
+          nullable: true
+          description: Populated for rule-based detectors; null for ML-based.
+        feature_schema_version:
+          type: string
+          nullable: true
+        evaluation_window_seconds:
+          type: integer
+          format: int32
+          minimum: 0
+          nullable: true
+        finding_type:
+          type: string
+          description: Type of finding (e.g. `suspicious_outbound_connection`).
+        severity:
+          $ref: '#/components/schemas/Severity'
+        risk_score:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Integer 0-100 used for ranking and policy thresholds.
+        confidence:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          nullable: true
+          description: |
+            Float 0-1 expressing model or detector confidence. Neither
+            `risk_score` nor `confidence` should be described as the
+            probability of an attack unless properly calibrated.
+        observed_at:
+          type: string
+          format: date-time
+          description: UTC RFC 3339 timestamp when the finding was observed.
+
+    DetectionEvaluationResponse:
+      type: object
+      required: [findings]
+      properties:
+        findings:
+          type: array
+          description: Detection findings produced by the evaluation.
+          items:
+            $ref: '#/components/schemas/DetectionFinding'
+        evaluated_count:
+          type: integer
+          format: int32
+          description: Number of events evaluated.
+
+    DetectionEvaluationAccepted:
+      type: object
+      required: [evaluation_id, status]
+      properties:
+        evaluation_id:
+          type: string
+          format: uuid
+          description: UUIDv7 identifier for tracking the asynchronous evaluation.
+        status:
+          type: string
+          enum: [accepted]
+        received_at:
+          type: string
+          format: date-time
+
+    InvestigationStartRequest:
+      type: object
+      required: [incident_id]
+      properties:
+        incident_id:
+          type: string
+          format: uuid
+        scope:
+          type: string
+          description: Optional scope or focus for the investigation.
+        reason:
+          type: string
+        requested_by:
+          type: string
+          format: uuid
+          description: UUIDv7 identifier of the requesting user or service.
+
+    InvestigationStartResponse:
+      type: object
+      required: [investigation_id, incident_id, status]
+      properties:
+        investigation_id:
+          type: string
+          format: uuid
+          description: UUIDv7 identifier of the investigation run.
+        incident_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [PENDING, RUNNING]
+          description: Current investigation status.
+        created_at:
+          type: string
+          format: date-time
+
+    PolicyEvaluationRequest:
+      description: |
+        Request to evaluate an action proposal against the effective security
+        policy. Corresponds to `policy-evaluation-v1.json`.
+      type: object
+      required: [proposal_id, action_type, target, tenant_id]
+      properties:
+        proposal_id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        action_type:
+          type: string
+          description: Allowlisted action type (e.g. `block_network_indicator`, `isolate_asset`).
+        target:
+          $ref: '#/components/schemas/ActionTarget'
+        parameters:
+          type: object
+          additionalProperties: true
+          description: Typed action parameters validated against the allowlisted action schema.
+        affected_asset_ids:
+          type: array
+          description: Protected assets whose security posture is being changed.
+          items:
+            type: string
+            format: uuid
+        evidence_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        requesting_service:
+          type: string
+          description: Identifier of the service requesting the evaluation.
+
+    PolicyEvaluationResult:
+      type: object
+      required: [decision, policy_version_id]
+      properties:
+        decision:
+          type: string
+          enum: [ALLOW, DENY, REQUIRE_APPROVAL]
+          description: |
+            Policy decision. `ALLOW` permits the action without human approval.
+            `DENY` prohibits the action. `REQUIRE_APPROVAL` requires human
+            authorization before a command can be created.
+        policy_version_id:
+          type: string
+          format: uuid
+          description: UUIDv7 identifier of the policy version used for this evaluation.
+        reason:
+          type: string
+          description: Human-readable explanation of the decision.
+        matched_rule_ids:
+          type: array
+          description: IDs of the policy rules that matched.
+          items:
+            type: string
+        approval_required:
+          type: boolean
+          description: True when the decision is `REQUIRE_APPROVAL`.
+        approval_requirements:
+          type: array
+          description: Requirements for approval when applicable.
+          items:
+            type: object
+            properties:
+              approver_role:
+                type: string
+                description: Role required to approve.
+              min_approvers:
+                type: integer
+                format: int32
+                minimum: 1
+              cannot_self_approve:
+                type: boolean
+                description: True if the proposing user cannot approve their own proposal.
+
+    ActionTarget:
+      description: |
+        Typed enforcement target. The enforcement target and the affected asset
+        are different things and must be kept separate.
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          enum: [network_indicator, asset, domain_indicator]
+          description: |
+            `network_indicator` for IP/CIDR/domain indicators; `asset` for
+            isolating a protected host.
+        address:
+          type: string
+          description: IP, CIDR, or domain depending on kind.
+          example: 198.51.100.20/32
+        direction:
+          type: string
+          enum: [egress, ingress, both]
+        gateway_id:
+          type: string
+          format: uuid
+        protocol:
+          type: string
+          example: tcp
+        ports:
+          type: array
+          items:
+            type: integer
+            format: int32
+            minimum: 0
+            maximum: 65535
+        asset_id:
+          type: string
+          format: uuid
+          description: UUIDv7 asset identifier when kind is `asset`.
+
+    CreateCommandRequest:
+      description: |
+        Request to create an authorized, signed command from an approved
+        proposal. The response service creates the command and transitions it
+        to `QUEUED`. Corresponds to `action-command-v1.json`.
+      type: object
+      required:
+        - tenant_id
+        - gateway_id
+        - action_type
+        - target
+        - parameters
+        - proposal_id
+        - approval_id
+        - policy_version_id
+        - nonce
+        - idempotency_key
+      properties:
+        tenant_id:
+          type: string
+          format: uuid
+        gateway_id:
+          type: string
+          format: uuid
+          description: Exact gateway identity that should enforce the action.
+        action_type:
+          type: string
+          description: Allowlisted action type.
+        target:
+          $ref: '#/components/schemas/ActionTarget'
+        parameters:
+          type: object
+          additionalProperties: true
+          description: Exact typed action parameters.
+        proposal_id:
+          type: string
+          format: uuid
+          description: Originating proposal in the authorization chain.
+        approval_id:
+          type: string
+          format: uuid
+          description: Human authorization record in the authorization chain.
+        policy_version_id:
+          type: string
+          format: uuid
+          description: Policy version used at authorization time.
+        nonce:
+          type: string
+          description: Unique per command to prevent replay.
+        idempotency_key:
+          type: string
+          description: Idempotency key for safe retransmission.
+        expires_in_seconds:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Short expiry window for the command.
+
+    Command:
+      type: object
+      required:
+        - command_id
+        - tenant_id
+        - gateway_id
+        - action_type
+        - target
+        - status
+        - nonce
+        - idempotency_key
+        - signature
+        - policy_version_id
+        - approval_id
+        - proposal_id
+        - created_at
+        - expires_at
+      properties:
+        command_id:
+          type: string
+          format: uuid
+          description: UUIDv7 command identifier.
+        tenant_id:
+          type: string
+          format: uuid
+        gateway_id:
+          type: string
+          format: uuid
+        action_type:
+          type: string
+        target:
+          $ref: '#/components/schemas/ActionTarget'
+        parameters:
+          type: object
+          additionalProperties: true
+        proposal_id:
+          type: string
+          format: uuid
+        approval_id:
+          type: string
+          format: uuid
+        policy_version_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [QUEUED, LEASED, ACKNOWLEDGED, EXPIRED, CANCELLED]
+          description: |
+            Command lifecycle status. `DISPATCHED` is recorded as a timestamped
+            audit event, not as a lifecycle state.
+        nonce:
+          type: string
+          description: Unique per command to prevent replay.
+        idempotency_key:
+          type: string
+        signature:
+          type: string
+          description: Cryptographic signature verifiable by the gateway.
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+          description: Short expiry window timestamp.
+
+    VerifyCommandRequest:
+      description: |
+        Request to perform an independent read-back and set the verification
+        status for a command's execution attempt.
+      type: object
+      required: [verification_status]
+      properties:
+        execution_attempt_id:
+          type: string
+          format: uuid
+          description: UUIDv7 identifier of the execution attempt to verify.
+        verification_status:
+          type: string
+          enum: [VERIFIED, NOT_VERIFIED, UNKNOWN]
+          description: |
+            Independent confirmation that the intended enforcement state exists.
+            `VERIFIED` — read-back confirmed the enforcement state is in effect.
+            `NOT_VERIFIED` — read-back confirmed the enforcement state is not in
+            effect. `UNKNOWN` — verification could not be completed.
+        observed_enforcement_state:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: What the verification observed about the enforcement state.
+        reason:
+          type: string
+          description: Explanation for the verification result.
+
+    VerifyCommandResult:
+      type: object
+      required: [command_id, execution_attempt_id, verification_status]
+      properties:
+        command_id:
+          type: string
+          format: uuid
+        execution_attempt_id:
+          type: string
+          format: uuid
+        verification_status:
+          type: string
+          enum: [PENDING, VERIFIED, NOT_VERIFIED, UNKNOWN]
+          description: Recorded verification status.
+        verified_at:
+          type: string
+          format: date-time
+          description: UTC RFC 3339 timestamp when verification was performed.
+        escalated:
+          type: boolean
+          description: |
+            True when verification is `UNKNOWN` and the system escalated because
+            the actual enforcement state could not be determined.
+
+    AuditEventAppendRequest:
+      description: |
+        Request to append a security-relevant activity record to the audit
+        trail. Corresponds to `audit-event-v1.json`.
+      type: object
+      required: [tenant_id, action, actor_id, actor_type, occurred_at]
+      properties:
+        tenant_id:
+          type: string
+          format: uuid
+        action:
+          type: string
+          description: |
+            Security-relevant action (e.g. `command.dispatched`,
+            `command.claimed`, `command.acknowledged`,
+            `alert.acknowledged`, `incident.transitioned`).
+        actor_id:
+          type: string
+          format: uuid
+          description: UUIDv7 identifier of the user or service that performed the action.
+        actor_type:
+          type: string
+          enum: [USER, SERVICE, GATEWAY]
+        target_type:
+          type: string
+          description: Type of object acted upon (e.g. `command`, `incident`, `alert`).
+        target_id:
+          type: string
+          format: uuid
+          nullable: true
+        reason:
+          type: string
+          nullable: true
+        occurred_at:
+          type: string
+          format: date-time
+          description: UTC RFC 3339 timestamp when the action occurred.
+        trace_id:
+          type: string
+          pattern: '^[0-9a-f]{32}$'
+          nullable: true
+          description: W3C Trace Context trace identifier, if available.
+        metadata:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: Additional context relevant to the audit event.
+
+    AuditEventAppendResult:
+      type: object
+      required: [audit_event_id, appended_at]
+      properties:
+        audit_event_id:
+          type: string
+          format: uuid
+          description: UUIDv7 identifier assigned to the appended audit record.
+        appended_at:
+          type: string
+          format: date-time
+          description: UTC RFC 3339 timestamp when the record was appended.

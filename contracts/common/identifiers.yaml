@@ -1,0 +1,257 @@
+# contracts/common/identifiers.yaml
+# Ascense Identifier Registry
+# ---------------------------------------------------------------------------
+# Authoritative source for all internal identifier formats and rules.
+# See docs/02_CONTRACTS_AND_IDENTIFIERS.md for the narrative specification.
+#
+# The contracts/ directory is the authoritative source for every shared
+# interface. No team invents its own version of an event, ID, status, or
+# API response.
+# ---------------------------------------------------------------------------
+
+version: "1.0"
+updated: "2026-11-06"
+status: frozen
+
+# ---------------------------------------------------------------------------
+# Format conventions
+# ---------------------------------------------------------------------------
+# All internally generated entity IDs use UUIDv7 (RFC 9562), serialized as a
+# lowercase string. Prefixes in logs are display conventions only — the actual
+# identifier is always a plain UUID (no prefix).
+#
+# trace_id is NOT a UUIDv7. It follows the W3C Trace Context specification: a
+# 32-character lowercase hexadecimal string representing 16 bytes, carried in
+# the `traceparent` header.
+#
+# Do not assume the user ID from an external identity provider is your internal
+# UUID. Maintain a mapping between the internal user_id and the external
+# identity's issuer and subject claim.
+
+formats:
+  uuid_v7:
+    description: "UUIDv7 (RFC 9562), time-ordered, lowercase string serialization."
+    pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    example: "0198e728-0000-7000-8000-000000000000"
+  w3c_trace:
+    description: "W3C Trace Context trace_id — 32-character lowercase hexadecimal string (16 bytes)."
+    pattern: "^[0-9a-f]{32}$"
+    example: "0af7651916cd43dd8448eb211c80319c"
+  source_event_id:
+    description: "Identifier produced by the original sensor (e.g. Zeek UID). Preserved as-is from the source. When the sensor provides no stable ID, the gateway generates one before first transmission and reuses it on all retries."
+    format: "opaque-string"
+
+# ---------------------------------------------------------------------------
+# Identifier Registry
+# ---------------------------------------------------------------------------
+identifiers:
+  - name: tenant_id
+    represents: "Customer organization"
+    format: uuid_v7
+    created_by: "Tenant service"
+    description: >
+      Identifies a customer organization. Every tenant-owned database record
+      must carry a tenant_id. Internal services must check tenant ownership
+      before reading or modifying any object.
+
+  - name: user_id
+    represents: "Internal user identity (mapped from external IdP)"
+    format: uuid_v7
+    created_by: "Identity system"
+    description: >
+      Internal user identity. Do not assume the external IdP subject is this
+      UUID. Maintain a mapping between user_id and the external identity's
+      issuer and subject claim.
+
+  - name: gateway_id
+    represents: "Installed gateway deployment"
+    format: uuid_v7
+    created_by: "Gateway registry"
+    description: >
+      Identifies a registered gateway deployment. The URL gateway_id must
+      match the authenticated mTLS certificate identity on every request.
+
+  - name: asset_id
+    represents: "Protected host, service, or device"
+    format: uuid_v7
+    created_by: "Asset registry"
+    description: >
+      Identifies a protected asset (server, device, network segment, or
+      service). Tracked separately for source and destination endpoints of a
+      network connection.
+
+  - name: source_event_id
+    represents: "ID produced by the original sensor (e.g. Zeek UID)"
+    format: source_event_id
+    created_by: "Preserved from source (gateway-generated if sensor provides none)"
+    description: >
+      Original sensor-assigned identifier. Preserve separately from event_id.
+      It is not a substitute for event_id and must not be used as one. When the
+      sensor provides no stable ID, the gateway must generate one before first
+      transmission and preserve it across all retransmission retries — never
+      generate a new ID on retry.
+
+  - name: event_id
+    represents: "Ascense normalized event record"
+    format: uuid_v7
+    created_by: "Ingestion layer"
+    description: >
+      Ascense internal event identifier, created after acceptance and
+      normalization. Deduplication uses (source, id) which maps to
+      (gateway_id + sensor_instance_id, source_event_id).
+
+  - name: detection_finding_id
+    represents: "Output from one detector run"
+    format: uuid_v7
+    created_by: "Detection layer"
+    description: >
+      Output of a single detector run (rule-based or ML-based) against one or
+      more events. A detection engine creates this ID; it does not
+      independently decide that a customer-facing incident exists.
+
+  - name: alert_id
+    represents: "Actionable correlated finding"
+    format: uuid_v7
+    created_by: "Correlation service"
+    description: >
+      An actionable security finding, potentially combining multiple findings
+      or repeated observations. Promoted from detection findings by the
+      correlation service.
+
+  - name: incident_id
+    represents: "Security case grouping related alerts"
+    format: uuid_v7
+    created_by: "Correlation service"
+    description: >
+      A connected security case containing one or more alerts, related assets,
+      evidence, investigations, and responses. Never treat possession of an
+      incident_id as proof of authorization.
+
+  - name: evidence_id
+    represents: "A stored evidence record"
+    format: uuid_v7
+    created_by: "Evidence service"
+    description: >
+      A retrievable, authorized evidence record. An AI explanation is not
+      itself evidence. Investigation claims must refer to real, retrievable,
+      authorized evidence records.
+
+  - name: investigation_id
+    represents: "An investigation run"
+    format: uuid_v7
+    created_by: "Investigation service"
+    description: >
+      Identifies one investigation run that produces structured results,
+      uncertainty reporting, and action proposals with typed targets.
+
+  - name: proposal_id
+    represents: "A proposed response action"
+    format: uuid_v7
+    created_by: "Investigation or response workflow"
+    description: >
+      A proposed response action. A proposal is not a command. Any material
+      change to proposal parameters invalidates its earlier approval.
+
+  - name: approval_id
+    represents: "A human authorization record"
+    format: uuid_v7
+    created_by: "Approval service"
+    description: >
+      A human authorization record with explicit expiry and revocation. A user
+      must not approve their own high-impact proposal. Critical actions may
+      require a second authorized approver.
+
+  - name: command_id
+    represents: "An authorized, signed executable command"
+    format: uuid_v7
+    created_by: "Response service"
+    description: >
+      A signed executable command bound to tenant, gateway, target, approval,
+      and policy version. The gateway must reject expired, replayed,
+      incorrectly signed, mismatched, or unauthorized commands.
+
+  - name: execution_attempt_id
+    represents: "One specific execution attempt"
+    format: uuid_v7
+    created_by: "Gateway/response adapter"
+    description: >
+      One specific execution attempt. The gateway persists an execution
+      journal record before performing any action; this record is the basis
+      for idempotency on reconnection.
+
+  - name: policy_version_id
+    represents: "An immutable policy revision"
+    format: uuid_v7
+    created_by: "Policy service"
+    description: >
+      An immutable policy revision used at authorization time. A command is
+      rejected if the target's criticality or relevant policy has changed since
+      approval.
+
+  - name: model_version_id
+    represents: "A deployed model revision"
+    format: uuid_v7
+    created_by: "Model registry"
+    description: >
+      A deployed model revision. For ML-based detections, model_version_id is
+      populated and rule_version is null.
+
+  - name: request_id
+    represents: "An individual API request"
+    format: uuid_v7
+    created_by: "API layer"
+    description: >
+      Identifies an individual API request. Keep request_id, trace_id, and
+      business entity IDs distinct in logs and responses.
+
+  - name: trace_id
+    represents: "A distributed trace"
+    format: w3c_trace
+    created_by: "W3C Trace Context (32-char hex)"
+    description: >
+      A distributed trace identifier following the W3C Trace Context
+      specification: a 32-character lowercase hexadecimal string representing 16
+      bytes, carried in the `traceparent` header. NOT a UUIDv7.
+
+# ---------------------------------------------------------------------------
+# ID Rules
+# ---------------------------------------------------------------------------
+rules:
+  - id: R1
+    rule: "Every tenant-owned database record must carry a tenant_id."
+    applies_to: "all tenant-owned records"
+
+  - id: R2
+    rule: "An internal service must check tenant ownership before reading or modifying an object."
+    applies_to: "internal services"
+
+  - id: R3
+    rule: "Never treat possession of an incident_id, gateway_id, or any other ID as proof of authorization."
+    applies_to: "authorization"
+
+  - id: R4
+    rule: "The backend derives tenant context from the authenticated user or gateway identity. The caller must not be able to change tenant ownership by changing request JSON."
+    applies_to: "tenant context resolution"
+
+  - id: R5
+    rule: "Preserve source_event_id separately. It is not a substitute for event_id and must not be used as one."
+    applies_to: "event identifiers"
+
+  - id: R6
+    rule: "Keep request_id, trace_id, and business entity IDs distinct in logs and responses."
+    applies_to: "observability"
+
+  - id: R7
+    rule: "Do not assume the user ID from an external identity provider is the internal UUID. Maintain a mapping between internal user_id and the external identity's issuer and subject claim."
+    applies_to: "identity mapping"
+
+# ---------------------------------------------------------------------------
+# Domain model note: Finding -> Alert -> Incident
+# ---------------------------------------------------------------------------
+domain_model:
+  note: >
+    Detection finding, alert, and incident are distinct objects. Do not
+    conflate them. A detection engine creates a detection_finding_id; it does
+    not independently decide that a customer-facing incident exists. The
+    correlation service promotes findings into alerts and groups alerts into
+    incidents.

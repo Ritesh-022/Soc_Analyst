@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.ascense.example/contracts/events/event-batch-v1.json",
+  "title": "Event Batch v1",
+  "description": "Batch ingestion request containing CloudEvents 1.0 envelopes.",
+  "type": "array",
+  "minItems": 1,
+  "maxItems": 1000,
+  "items": {
+    "type": "object",
+    "required": [
+      "specversion",
+      "id",
+      "source",
+      "type",
+      "time",
+      "data"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "specversion": {
+        "type": "string",
+        "const": "1.0"
+      },
+      "id": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Unique within source; equals source_event_id"
+      },
+      "source": {
+        "type": "string",
+        "pattern": "^urn:ascense:gateway:[0-9a-f-]+/sensor/.+$",
+        "description": "URN: gateway + sensor instance"
+      },
+      "type": {
+        "type": "string",
+        "pattern": "^com\\.ascense\\..+\\.v[0-9]+$"
+      },
+      "subject": {
+        "type": "string"
+      },
+      "time": {
+        "type": "string",
+        "format": "date-time"
+      },
+      "datacontenttype": {
+        "type": "string"
+      },
+      "dataschema": {
+        "type": "string",
+        "format": "uri"
+      },
+      "tenantid": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "gatewayid": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "data": {
+        "$ref": "https://schemas.ascense.example/contracts/events/network-connection-v1.json"
+      }
+    }
+  }
+}

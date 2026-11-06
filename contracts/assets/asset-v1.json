@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.ascense.example/contracts/assets/asset-v1.json",
+  "title": "Asset v1",
+  "description": "Infrastructure ownership and criticality.",
+  "type": "object",
+  "required": [
+    "asset_id",
+    "tenant_id",
+    "asset_type",
+    "criticality",
+    "status"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "asset_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "hostname": {
+      "type": "string"
+    },
+    "asset_type": {
+      "type": "string",
+      "enum": [
+        "server",
+        "device",
+        "network_segment",
+        "service"
+      ]
+    },
+    "ip_addresses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "address"
+        ],
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "first_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    "criticality": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
+    },
+    "environment": {
+      "type": "string"
+    },
+    "location": {
+      "type": "string"
+    },
+    "gateway_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "decommissioned",
+        "unknown"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.ascense.example/contracts/response/action-command-v1.json",
+  "title": "Action Command v1",
+  "description": "Authorized, signed executable command. Binds tenant, gateway, target, approval, policy version, nonce, idempotency, signature.",
+  "type": "object",
+  "required": [
+    "command_id",
+    "tenant_id",
+    "gateway_id",
+    "action_type",
+    "target",
+    "status",
+    "nonce",
+    "idempotency_key",
+    "signature",
+    "policy_version_id",
+    "approval_id",
+    "proposal_id",
+    "expires_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "command_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "gateway_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "action_type": {
+      "type": "string",
+      "enum": [
+        "block_network_indicator",
+        "isolate_asset"
+      ]
+    },
+    "target": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "network_indicator",
+            "asset",
+            "domain_indicator"
+          ]
+        },
+        "address": {
+          "type": "string"
+        },
+        "direction": {
+          "type": "string",
+          "enum": [
+            "egress",
+            "ingress",
+            "both"
+          ]
+        },
+        "gateway_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "protocol": {
+          "type": "string"
+        },
+        "ports": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 65535
+          }
+        },
+        "asset_id": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "proposal_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "approval_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "policy_version_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "QUEUED",
+        "LEASED",
+        "ACKNOWLEDGED",
+        "EXPIRED",
+        "CANCELLED"
+      ],
+      "description": "DISPATCHED is NOT a command state \u2014 it is an audit event only"
+    },
+    "nonce": {
+      "type": "string",
+      "description": "Unique per command to prevent replay"
+    },
+    "idempotency_key": {
+      "type": "string"
+    },
+    "signature": {
+      "type": "string",
+      "description": "Cryptographic signature verifiable by the gateway"
+    },
+    "lease_expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Short expiry window"
+    }
+  }
+}

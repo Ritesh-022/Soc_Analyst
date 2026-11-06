@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.ascense.example/contracts/events/detection-finding-v1.json",
+  "title": "Detection Finding v1",
+  "description": "Output from one detector run (rule or ML). For rule-based: model_version_id null, rule_version populated. For ML-based: rule_version null, model_version_id populated.",
+  "type": "object",
+  "required": [
+    "detection_finding_id",
+    "tenant_id",
+    "event_ids",
+    "detector_id",
+    "detector_version",
+    "finding_type",
+    "severity",
+    "risk_score",
+    "observed_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "detection_finding_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "event_ids": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "uuid"
+      }
+    },
+    "detector_id": {
+      "type": "string"
+    },
+    "detector_version": {
+      "type": "string"
+    },
+    "model_version_id": {
+      "type": ["string", "null"],
+      "format": "uuid"
+    },
+    "rule_version": {
+      "type": ["string", "null"]
+    },
+    "feature_schema_version": {
+      "type": "string"
+    },
+    "evaluation_window_seconds": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "finding_type": {
+      "type": "string"
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
+    },
+    "risk_score": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Integer 0-100 used for ranking and policy thresholds"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Float 0-1 expressing model or detector confidence"
+    },
+    "observed_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

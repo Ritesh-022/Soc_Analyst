@@ -1,0 +1,198 @@
+# contracts/common/enums.yaml
+# Ascense Enumerated Values
+# ---------------------------------------------------------------------------
+# Authoritative source for all enumerated value sets used across contracts,
+# database schemas, and API responses.
+# ---------------------------------------------------------------------------
+
+version: "1.0"
+updated: "2026-11-06"
+status: frozen
+
+# ---------------------------------------------------------------------------
+# Gateway lifecycle states
+# ---------------------------------------------------------------------------
+gateway_states:
+  - UNREGISTERED
+  - ENROLLMENT_PENDING
+  - ACTIVE
+  - DEGRADED
+  - DISCONNECTED
+  - REVOKED
+  - DECOMMISSIONED
+
+# ---------------------------------------------------------------------------
+# Sensor states (per-sensor, independent of gateway connectivity)
+# ---------------------------------------------------------------------------
+sensor_states:
+  - HEALTHY
+  - DEGRADED
+  - SENSOR_FAILURE
+  - UNKNOWN
+
+# ---------------------------------------------------------------------------
+# Telemetry health states (overall gateway telemetry coverage)
+# ---------------------------------------------------------------------------
+telemetry_health_states:
+  - HEALTHY: "Heartbeat current, sensors reporting, events arriving"
+  - DEGRADED: "Heartbeat current but one or more sensors not reporting"
+  - DISCONNECTED: "No heartbeat within the expected window"
+  - SENSOR_FAILURE: "Specific sensor process has stopped or is erroring"
+  - TELEMETRY_STALE: "Events have not arrived within the expected freshness window"
+  - UNKNOWN: "No baseline established yet"
+
+# ---------------------------------------------------------------------------
+# Asset resolution status
+# ---------------------------------------------------------------------------
+asset_resolution_status:
+  - RESOLVED: "IP/host found in asset registry"
+  - UNRESOLVED: "IP/host not yet in asset registry; stored for async resolution"
+  - AMBIGUOUS: "Multiple assets match the identifier"
+  - STALE_MAPPING: "Previously resolved mapping is no longer valid"
+
+# ---------------------------------------------------------------------------
+# Severity (categorical business priority)
+# ---------------------------------------------------------------------------
+severity:
+  - low
+  - medium
+  - high
+  - critical
+
+# ---------------------------------------------------------------------------
+# Alert lifecycle
+# ---------------------------------------------------------------------------
+alert_status:
+  - NEW
+  - ACKNOWLEDGED
+  - UNDER_INVESTIGATION
+  - RESOLVED
+  - FALSE_POSITIVE
+
+# ---------------------------------------------------------------------------
+# Incident lifecycle
+# ---------------------------------------------------------------------------
+incident_status:
+  - OPEN
+  - TRIAGED
+  - INVESTIGATING
+  - CONTAINMENT_IN_PROGRESS
+  - CONTAINED
+  - RECOVERING
+  - RESOLVED
+  - CLOSED
+
+# ---------------------------------------------------------------------------
+# Proposal states
+# ---------------------------------------------------------------------------
+proposal_status:
+  - DRAFT
+  - SUBMITTED
+  - POLICY_EVALUATION
+  - REJECTED
+  - EXPIRED
+  - APPROVAL_PENDING
+  - APPROVED
+
+# ---------------------------------------------------------------------------
+# Approval states
+# ---------------------------------------------------------------------------
+approval_status:
+  - PENDING
+  - APPROVED
+  - REJECTED
+  - EXPIRED
+  - REVOKED
+
+# ---------------------------------------------------------------------------
+# Command lifecycle states
+# ---------------------------------------------------------------------------
+# Note: DISPATCHED is NOT a command lifecycle state.
+# It is a named audit event recorded when the dispatcher places the command
+# in the gateway's outbound queue. Do not add it as a value in the command
+# status column.
+command_status:
+  - QUEUED: "Command created and waiting to be claimed"
+  - LEASED: "Atomically claimed by a gateway; lease has a defined expiry"
+  - ACKNOWLEDGED: "Gateway has confirmed receipt and accepted the command"
+  - EXPIRED: "Lease or command window elapsed before acknowledgement"
+  - CANCELLED: "Explicitly cancelled before or after leasing"
+
+# ---------------------------------------------------------------------------
+# Execution status (what the gateway did — separate from verification)
+# ---------------------------------------------------------------------------
+execution_status:
+  - NOT_STARTED: "Attempt created but execution has not begun"
+  - RUNNING: "Execution is in progress"
+  - SUCCEEDED: "Gateway confirmed the action completed without error"
+  - FAILED: "Gateway confirmed the action did not succeed"
+  - PARTIALLY_SUCCEEDED: "Some operations completed; others did not"
+  - UNKNOWN: "Execution state cannot be determined (e.g. gateway crashed mid-execution)"
+  - ROLLBACK_PENDING: "Partial execution requires rollback"
+  - ROLLED_BACK: "Rollback completed successfully"
+  - ROLLBACK_FAILED: "Rollback attempted but did not complete"
+
+# ---------------------------------------------------------------------------
+# Verification status (independent confirmation — set by response
+# verification service only, NOT by the gateway)
+# ---------------------------------------------------------------------------
+verification_status:
+  - PENDING: "Verification has not yet been attempted"
+  - VERIFIED: "Independent read-back confirmed the enforcement state is in effect"
+  - NOT_VERIFIED: "Read-back confirmed the enforcement state is not in effect"
+  - UNVERIFIABLE: "Verification could not be completed (e.g. firewall unreachable)"
+
+# ---------------------------------------------------------------------------
+# Investigation run status
+# ---------------------------------------------------------------------------
+investigation_status:
+  - PENDING
+  - RUNNING
+  - COMPLETED
+  - CANCELLED
+  - FAILED
+
+# ---------------------------------------------------------------------------
+# Policy evaluation decisions
+# ---------------------------------------------------------------------------
+policy_decision:
+  - ALLOW: "Action permitted without human approval"
+  - DENY: "Action prohibited"
+  - REQUIRE_APPROVAL: "Human authorization required before command creation"
+
+# ---------------------------------------------------------------------------
+# Action types (allowlisted)
+# ---------------------------------------------------------------------------
+action_types:
+  - block_network_indicator: "Block a network IP/CIDR/domain indicator"
+  - isolate_asset: "Isolate a protected host from network access"
+
+# ---------------------------------------------------------------------------
+# Action target kinds (typed enforcement targets)
+# ---------------------------------------------------------------------------
+action_target_kinds:
+  - network_indicator: "IP, CIDR, or domain indicator"
+  - asset: "A protected host to isolate"
+  - domain_indicator: "A domain name to block"
+
+# ---------------------------------------------------------------------------
+# Actor types (for audit records)
+# ---------------------------------------------------------------------------
+actor_types:
+  - USER
+  - SERVICE
+  - GATEWAY
+
+# ---------------------------------------------------------------------------
+# Audit event outcome
+# ---------------------------------------------------------------------------
+audit_outcome:
+  - success
+  - failure
+
+# ---------------------------------------------------------------------------
+# Detector types
+# ---------------------------------------------------------------------------
+detector_types:
+  - RULE: "Rule-based detection (rule_version populated, model_version_id null)"
+  - ML: "ML-based detection (model_version_id populated, rule_version null)"

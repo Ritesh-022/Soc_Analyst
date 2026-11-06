@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.ascense.example/contracts/assets/network-indicator-v1.json",
+  "title": "Network Indicator v1",
+  "description": "IP, CIDR, domain indicators used as typed enforcement targets.",
+  "type": "object",
+  "required": [
+    "kind",
+    "address"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "type": "string",
+      "enum": [
+        "network_indicator",
+        "domain_indicator"
+      ]
+    },
+    "address": {
+      "type": "string"
+    },
+    "direction": {
+      "type": "string",
+      "enum": [
+        "egress",
+        "ingress",
+        "both"
+      ]
+    },
+    "gateway_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "protocol": {
+      "type": "string",
+      "enum": [
+        "tcp",
+        "udp",
+        "icmp",
+        "any"
+      ]
+    },
+    "ports": {
+      "type": "array",
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 65535
+      }
+    }
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.ascense.example/contracts/response/approval-v1.json",
+  "title": "Approval v1",
+  "description": "Human authorization record. Must record identity, role, decision, reason, time, proposal version, expiry. Do not accept {approved: true} alone.",
+  "type": "object",
+  "required": [
+    "approval_id",
+    "proposal_id",
+    "decision",
+    "approver_id",
+    "status"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "approval_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "proposal_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "APPROVED",
+        "REJECTED"
+      ]
+    },
+    "reason": {
+      "type": "string"
+    },
+    "approver_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "approver_role": {
+      "type": "string"
+    },
+    "proposal_version": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PENDING",
+        "APPROVED",
+        "REJECTED",
+        "EXPIRED",
+        "REVOKED"
+      ]
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

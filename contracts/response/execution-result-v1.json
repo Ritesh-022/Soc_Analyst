@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.ascense.example/contracts/response/execution-result-v1.json",
+  "title": "Execution Result v1",
+  "description": "Actual gateway execution result. execution_status and verification_status are separate fields.",
+  "type": "object",
+  "required": [
+    "execution_attempt_id",
+    "command_id",
+    "execution_status",
+    "verification_status"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "execution_attempt_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "command_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "command_hash": {
+      "type": "string"
+    },
+    "received_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "execution_started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "execution_completed_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "execution_status": {
+      "type": "string",
+      "enum": [
+        "NOT_STARTED",
+        "RUNNING",
+        "SUCCEEDED",
+        "FAILED",
+        "PARTIALLY_SUCCEEDED",
+        "UNKNOWN",
+        "ROLLBACK_PENDING",
+        "ROLLED_BACK",
+        "ROLLBACK_FAILED"
+      ],
+      "description": "What the gateway did. Only the gateway sets this."
+    },
+    "verification_status": {
+      "type": "string",
+      "enum": [
+        "PENDING",
+        "VERIFIED",
+        "NOT_VERIFIED",
+        "UNVERIFIABLE"
+      ],
+      "description": "Independent confirmation. Only the response verification service sets this."
+    },
+    "observed_enforcement_state": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "result_reference": {
+      "type": "string"
+    }
+  }
+}

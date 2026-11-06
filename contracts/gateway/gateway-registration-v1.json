@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.ascense.example/contracts/gateway/gateway-registration-v1.json",
+  "title": "Gateway Registration v1",
+  "description": "Enrollment and gateway identity.",
+  "type": "object",
+  "required": [
+    "gateway_id",
+    "tenant_id",
+    "name",
+    "status",
+    "created_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "gateway_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "tenant_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "UNREGISTERED",
+        "ENROLLMENT_PENDING",
+        "ACTIVE",
+        "DEGRADED",
+        "DISCONNECTED",
+        "REVOKED",
+        "DECOMMISSIONED"
+      ]
+    },
+    "certificate": {
+      "type": "object",
+      "properties": {
+        "fingerprint": {
+          "type": "string"
+        },
+        "issued_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "sensors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "instance_id",
+          "enabled"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "instance_id": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "config": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "config_version": {
+      "type": "integer",
+      "format": "int64",
+      "minimum": 0
+    },
+    "enrolled_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

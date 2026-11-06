@@ -1,0 +1,906 @@
+openapi: 3.2.1
+info:
+  title: Ascense Edge API
+  version: 1.0.0
+  description: |
+    Gateway-facing API for authenticated gateway communication.
+
+    All endpoints live under the `/edge/v1/` namespace and are consumed exclusively
+    by installed gateway deployments. A gateway authenticates using mutual TLS.
+    On every request, the service verifies that the URL's `gateway_id` matches the
+    authenticated certificate identity — the caller must not be able to impersonate
+    another gateway by changing a path parameter.
+
+    Conventions:
+      - JSON property names use `snake_case`.
+      - Date/time values are UTC, RFC 3339 (e.g. `2026-11-06T06:30:00Z`).
+      - Entity IDs are UUIDv7 strings (RFC 9562).
+      - Error responses use RFC 9457 Problem Details (`application/problem+json`).
+      - `trace_id` follows the W3C Trace Context spec (32-char lowercase hex).
+servers:
+  - url: https://edge.ascense.example
+    description: Production edge endpoint
+  - url: https://edge.staging.ascense.example
+    description: Staging edge endpoint
+
+security:
+  - mutualTLS: []
+
+paths:
+  /edge/v1/gateways/{gateway_id}/heartbeat:
+    post:
+      tags: [Heartbeat]
+      summary: Gateway heartbeat with sensor health
+      description: |
+        Reports gateway liveness and per-sensor health. The service verifies that
+        the `gateway_id` path parameter matches the authenticated certificate
+        identity. On success, returns the current configuration version the
+        gateway should be running.
+      operationId: postGatewayHeartbeat
+      parameters:
+        - $ref: '#/components/parameters/GatewayIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GatewayHeartbeatV1'
+      responses:
+        '200':
+          description: Heartbeat accepted; returns updated configuration version.
+          headers:
+            traceparent:
+              $ref: '#/components/headers/Traceparent'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HeartbeatResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /edge/v1/events:batch:
+    post:
+      tags: [Events]
+      summary: Send telemetry batch
+      description: |
+        Submits a batch of events wrapped in CloudEvents 1.0 envelopes. The
+        `tenantid` and `gatewayid` extension attributes are verified against the
+        authenticated gateway identity and never trusted from the payload alone.
+
+        Deduplication uses the combination of `source` and `id` (the CloudEvents
+        uniqueness pair), which maps to `(gateway_id + sensor_instance_id,
+        source_event_id)`.
+
+        A `202 Accepted` response means the batch has been accepted for processing.
+        It does not mean detection has completed. Partial acceptance is supported:
+        individual envelopes may be rejected while the batch is accepted.
+      operationId: postEventsBatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventBatchRequest'
+      responses:
+        '202':
+          description: Batch accepted for processing (partial acceptance supported).
+          headers:
+            traceparent:
+              $ref: '#/components/headers/Traceparent'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventBatchResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+
+  /edge/v1/gateways/{gateway_id}/commands:claim:
+    post:
+      tags: [Commands]
+      summary: Atomically claim pending commands (lease)
+      description: |
+        Atomically leases pending commands to the authenticated gateway for a
+        short, defined period. The service verifies that the `gateway_id` path
+        parameter matches the authenticated certificate identity.
+
+        Each claimed command includes a cryptographic signature verifiable by the
+        gateway. The gateway must reject commands that are expired, replayed,
+        incorrectly signed, mismatched, or unauthorized. It must also reject a
+        command if the target's criticality or relevant policy has changed since
+        approval.
+
+        If the lease expires before the gateway acknowledges, the command returns
+        to `QUEUED`. The same `command_id` is reused — do not create a new command.
+      operationId: claimCommands
+      parameters:
+        - $ref: '#/components/parameters/GatewayIdPath'
+      responses:
+        '200':
+          description: One or more pending commands were claimed.
+          headers:
+            traceparent:
+              $ref: '#/components/headers/Traceparent'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [claimed_commands, lease_expires_at]
+                properties:
+                  claimed_commands:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ClaimedCommand'
+                  lease_expires_at:
+                    type: string
+                    format: date-time
+                    description: UTC RFC 3339 timestamp when the lease expires.
+        '204':
+          description: No pending commands to claim.
+          headers:
+            traceparent:
+              $ref: '#/components/headers/Traceparent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /edge/v1/gateways/{gateway_id}/commands/{command_id}/acknowledgements:
+    post:
+      tags: [Commands]
+      summary: Confirm command receipt
+      description: |
+        Confirms that the gateway has received and accepted a claimed command,
+        transitioning the command from `LEASED` to `ACKNOWLEDGED`. The service
+        verifies that the `gateway_id` path parameter matches the authenticated
+        certificate identity.
+      operationId: acknowledgeCommand
+      parameters:
+        - $ref: '#/components/parameters/GatewayIdPath'
+        - $ref: '#/components/parameters/CommandIdPath'
+      responses:
+        '200':
+          description: Command acknowledgement recorded.
+          headers:
+            traceparent:
+              $ref: '#/components/headers/Traceparent'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandAcknowledgementResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /edge/v1/gateways/{gateway_id}/commands/{command_id}/results:
+    post:
+      tags: [Commands]
+      summary: Report execution result
+      description: |
+        Reports the actual execution result for a command. Execution status tracks
+        what the gateway did and is separate from verification status, which tracks
+        independent confirmation that the intended enforcement state exists.
+
+        The gateway must persist an execution journal record before performing any
+        action. On reconnection, the gateway checks the journal before acting to
+        support idempotency. If the execution state is uncertain after
+        reconnection, the gateway must report `UNKNOWN` and let Ascense escalate
+        — never claim success when the actual state is unknown.
+
+        Only the gateway sets execution status. Only the response verification
+        service sets verification status.
+      operationId: reportCommandResult
+      parameters:
+        - $ref: '#/components/parameters/GatewayIdPath'
+        - $ref: '#/components/parameters/CommandIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExecutionResultRequest'
+      responses:
+        '200':
+          description: Execution result recorded.
+          headers:
+            traceparent:
+              $ref: '#/components/headers/Traceparent'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExecutionResultResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /edge/v1/gateways/{gateway_id}/configuration:
+    get:
+      tags: [Configuration]
+      summary: Retrieve authorized configuration
+      description: |
+        Retrieves the authorized configuration for the authenticated gateway,
+        including sensor configs, detection rules version, and policy version.
+        The service verifies that the `gateway_id` path parameter matches the
+        authenticated certificate identity.
+      operationId: getGatewayConfiguration
+      parameters:
+        - $ref: '#/components/parameters/GatewayIdPath'
+        - name: if_version
+          in: query
+          description: |
+            If provided, the server returns 304 Not Modified when the current
+            configuration version equals this value.
+          required: false
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+      responses:
+        '200':
+          description: Authorized gateway configuration.
+          headers:
+            traceparent:
+              $ref: '#/components/headers/Traceparent'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayConfiguration'
+        '304':
+          description: Configuration unchanged since the provided `if_version`.
+          headers:
+            traceparent:
+              $ref: '#/components/headers/Traceparent'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    mutualTLS:
+      type: mutualTLS
+      description: |
+        Gateway authentication via mutual TLS. The service verifies that the
+        `gateway_id` in the URL matches the authenticated certificate identity
+        on every request.
+
+  parameters:
+    GatewayIdPath:
+      name: gateway_id
+      in: path
+      required: true
+      description: UUIDv7 identifier of the gateway. Must match the authenticated certificate identity.
+      schema:
+        type: string
+        format: uuid
+        pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        example: 0198e729-0000-7abc-8000-000000000001
+    CommandIdPath:
+      name: command_id
+      in: path
+      required: true
+      description: UUIDv7 identifier of the command.
+      schema:
+        type: string
+        format: uuid
+        pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+        example: 0198e740-0000-7abc-8000-000000000001
+
+  headers:
+    Traceparent:
+      description: W3C Trace Context header carrying the 32-character lowercase hex `trace_id`.
+      schema:
+        type: string
+        pattern: '^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$'
+
+  responses:
+    BadRequest:
+      description: The request was malformed or failed validation.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: The request was not authenticated (mTLS handshake failed or certificate missing).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: The authenticated gateway identity does not match the requested resource.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: The requested resource was not found.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: The request conflicts with the current state of the resource.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    PayloadTooLarge:
+      description: The request payload exceeds the maximum allowed size.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+
+  schemas:
+    Problem:
+      description: RFC 9457 Problem Details object.
+      type: object
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+          description: URI reference identifying the problem type.
+        title:
+          type: string
+          description: Short human-readable summary of the problem.
+        status:
+          type: integer
+          format: int32
+          description: HTTP status code for this occurrence.
+        detail:
+          type: string
+          description: Human-readable explanation specific to this occurrence.
+        instance:
+          type: string
+          format: uri-reference
+          description: URI reference identifying the specific occurrence.
+        trace_id:
+          type: string
+          pattern: '^[0-9a-f]{32}$'
+          description: W3C Trace Context trace identifier (32-char lowercase hex).
+        request_id:
+          type: string
+          description: UUIDv7 request identifier for correlation.
+        errors:
+          type: array
+          description: Field-level validation errors.
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              code:
+                type: string
+              message:
+                type: string
+
+    GatewayHeartbeatV1:
+      description: |
+        Gateway heartbeat payload reporting liveness and per-sensor health.
+        Corresponds to `gateway-heartbeat-v1.json`.
+      type: object
+      required: [gateway_id, sent_at, sensors]
+      properties:
+        gateway_id:
+          type: string
+          format: uuid
+          description: UUIDv7 identifier of the gateway. Must match the authenticated identity.
+        sent_at:
+          type: string
+          format: date-time
+          description: UTC RFC 3339 timestamp when the heartbeat was generated.
+        config_version:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Configuration version the gateway is currently running, if known.
+        sensors:
+          type: array
+          description: Per-sensor health status.
+          items:
+            $ref: '#/components/schemas/SensorStatusV1'
+        system:
+          $ref: '#/components/schemas/GatewaySystemInfo'
+
+    SensorStatusV1:
+      description: |
+        Individual sensor availability and health.
+        Corresponds to `sensor-status-v1.json`.
+      type: object
+      required: [name, instance_id, status]
+      properties:
+        name:
+          type: string
+          description: Controlled identifier from the approved sensor allowlist (e.g. `zeek`, `suricata`).
+          example: zeek
+        instance_id:
+          type: string
+          description: Stable identifier for the specific sensor process on this gateway.
+          example: zeek-01
+        version:
+          type: string
+          description: Sensor software version.
+          example: 7.x
+        status:
+          type: string
+          enum: [HEALTHY, DEGRADED, FAILED, UNKNOWN]
+          description: Current health status of the sensor.
+        last_event_at:
+          type: string
+          format: date-time
+          description: UTC RFC 3339 timestamp of the last event produced by this sensor.
+        error:
+          type: string
+          description: Error message if the sensor is degraded or failed.
+
+    GatewaySystemInfo:
+      type: object
+      description: Optional gateway system resource information.
+      properties:
+        cpu_percent:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+        memory_percent:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+        disk_percent:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 100
+        uptime_seconds:
+          type: integer
+          format: int64
+          minimum: 0
+
+    HeartbeatResponse:
+      type: object
+      required: [accepted, config_version]
+      properties:
+        accepted:
+          type: boolean
+          description: Whether the heartbeat was accepted.
+        config_version:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Current authoritative configuration version the gateway should apply.
+        config_changed:
+          type: boolean
+          description: Indicates whether the configuration has changed since the gateway's last reported version.
+
+    EventBatchRequest:
+      description: |
+        A batch of events wrapped in CloudEvents 1.0 envelopes. Each envelope's
+        `tenantid` and `gatewayid` are verified against the authenticated gateway
+        identity. Corresponds to `event-batch-v1.json`.
+      type: array
+      minItems: 1
+      maxItems: 1000
+      items:
+        $ref: '#/components/schemas/CloudEventEnvelope'
+
+    CloudEventEnvelope:
+      description: |
+        CloudEvents 1.0 envelope for an Ascense event. The `tenantid` and
+        `gatewayid` extension attributes are verified against the authenticated
+        gateway identity and never trusted from the payload alone.
+      type: object
+      required: [specversion, id, source, type, time, data]
+      properties:
+        specversion:
+          type: string
+          description: CloudEvents specification version. Must be `"1.0"`.
+          example: '1.0'
+        id:
+          type: string
+          description: |
+            Unique within its `source`; equals `source_event_id`. If the sensor
+            provides no stable ID, the gateway generates one before first
+            transmission and reuses it on retries.
+        source:
+          type: string
+          description: |
+            URN identifying a registered gateway and sensor instance:
+            `urn:ascense:gateway:{gateway_id}/sensor/{sensor_instance_id}`
+          example: urn:ascense:gateway:0198e729-0000-7abc-8000-000000000001/sensor/zeek-01
+        type:
+          type: string
+          description: Namespaced event type with version suffix (e.g. `.v1`).
+          example: com.ascense.network.connection.observed.v1
+        subject:
+          type: string
+          description: Optional subject identifying the affected asset.
+          example: asset/0198e72a-0000-7abc-8000-000000000001
+        time:
+          type: string
+          format: date-time
+          description: Event occurrence time in UTC, RFC 3339.
+        datacontenttype:
+          type: string
+          description: Content type of the `data` payload.
+          example: application/json
+        dataschema:
+          type: string
+          format: uri
+          description: URI identifying the payload schema.
+          example: https://schemas.ascense.example/events/network-connection/1.0.0
+        tenantid:
+          type: string
+          format: uuid
+          description: Verified against authenticated gateway identity.
+        gatewayid:
+          type: string
+          format: uuid
+          description: Must match the authenticated gateway certificate.
+        data:
+          $ref: '#/components/schemas/EventData'
+
+    EventData:
+      description: Ascense-specific event payload.
+      type: object
+      required: [schema_version, source_event_id, event_kind, sensor, asset_resolution]
+      properties:
+        schema_version:
+          type: string
+          description: Version of the Ascense event payload.
+          example: '1.0'
+        source_event_id:
+          type: string
+          description: Original sensor-assigned identifier; gateway-generated if sensor provides none.
+        event_kind:
+          type: string
+          description: Canonical event kind (e.g. `network.connection`).
+          example: network.connection
+        sensor:
+          type: object
+          required: [name, instance_id]
+          properties:
+            name:
+              type: string
+              description: Controlled identifier from the approved sensor allowlist.
+            instance_id:
+              type: string
+              description: Stable identifier for the specific sensor process.
+            version:
+              type: string
+        asset_resolution:
+          type: object
+          required: [status]
+          properties:
+            status:
+              type: string
+              enum: [RESOLVED, UNRESOLVED, AMBIGUOUS, STALE_MAPPING]
+              description: Resolution status of assets referenced by the event.
+            source_asset_id:
+              type: string
+              format: uuid
+              nullable: true
+              description: Asset ID for the source IP, if resolved; null otherwise.
+            destination_asset_id:
+              type: string
+              format: uuid
+              nullable: true
+              description: Asset ID for the destination IP, if resolved; null otherwise.
+
+    EventBatchResponse:
+      description: |
+        `202 Accepted` response. The batch has been accepted for processing;
+        it does not mean detection has completed. Partial acceptance is
+        supported.
+      type: object
+      required: [batch_id, status, accepted_count, rejected_count, received_at]
+      properties:
+        batch_id:
+          type: string
+          format: uuid
+          description: UUIDv7 identifier assigned to this batch.
+        status:
+          type: string
+          enum: [accepted]
+          description: Batch acceptance status.
+        accepted_count:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Number of event envelopes accepted.
+        rejected_count:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Number of event envelopes rejected.
+        rejections:
+          type: array
+          description: Details of each rejected envelope.
+          items:
+            $ref: '#/components/schemas/EventRejection'
+        received_at:
+          type: string
+          format: date-time
+          description: UTC RFC 3339 timestamp when the batch was received.
+
+    EventRejection:
+      type: object
+      required: [index, code, message]
+      properties:
+        index:
+          type: integer
+          format: int32
+          minimum: 0
+          description: Zero-based position of the rejected envelope in the batch array.
+        code:
+          type: string
+          description: Machine-readable rejection code.
+          example: INVALID_EVENT_SCHEMA
+        message:
+          type: string
+          description: Human-readable explanation.
+          example: Missing required event timestamp.
+
+    ClaimedCommand:
+      description: |
+        A command atomically leased to the gateway. The gateway must validate
+        signature, expiry, idempotency, and target criticality before executing.
+        Corresponds to `action-command-v1.json`.
+      type: object
+      required:
+        - command_id
+        - action_type
+        - target
+        - parameters
+        - expires_at
+        - nonce
+        - idempotency_key
+        - signature
+        - policy_version_id
+        - approval_id
+        - proposal_id
+      properties:
+        command_id:
+          type: string
+          format: uuid
+          description: UUIDv7 command identifier.
+        action_type:
+          type: string
+          description: Allowlisted action type (e.g. `block_network_indicator`, `isolate_asset`).
+          example: block_network_indicator
+        target:
+          $ref: '#/components/schemas/ActionTarget'
+        parameters:
+          type: object
+          description: Typed action parameters validated against the allowlisted action schema.
+          additionalProperties: true
+          example:
+            duration_seconds: 900
+        expires_at:
+          type: string
+          format: date-time
+          description: UTC RFC 3339 timestamp when the command expires. Short expiry window.
+        nonce:
+          type: string
+          description: Unique per command to prevent replay.
+        idempotency_key:
+          type: string
+          description: Idempotency key for safe retransmission.
+        signature:
+          type: string
+          description: Cryptographic signature verifiable by the gateway.
+        policy_version_id:
+          type: string
+          format: uuid
+          description: UUIDv7 identifier of the policy version used at authorization time.
+        approval_id:
+          type: string
+          format: uuid
+          description: UUIDv7 identifier of the human authorization record.
+        proposal_id:
+          type: string
+          format: uuid
+          description: UUIDv7 identifier of the originating proposal.
+
+    ActionTarget:
+      description: |
+        Typed enforcement target. The enforcement target and the affected asset
+        are different things and must be kept separate.
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          description: |
+            Target kind. `network_indicator` for IP/CIDR/domain indicators;
+            `asset` for isolating a protected host.
+          enum: [network_indicator, asset, domain_indicator]
+        address:
+          type: string
+          description: IP, CIDR, or domain depending on kind.
+          example: 198.51.100.20/32
+        direction:
+          type: string
+          enum: [egress, ingress, both]
+          description: Traffic direction for network indicators.
+        gateway_id:
+          type: string
+          format: uuid
+          description: UUIDv7 identifier of the gateway that should enforce the action.
+        protocol:
+          type: string
+          description: Network protocol (e.g. `tcp`, `udp`).
+          example: tcp
+        ports:
+          type: array
+          description: Port numbers affected by the action.
+          items:
+            type: integer
+            format: int32
+            minimum: 0
+            maximum: 65535
+        asset_id:
+          type: string
+          format: uuid
+          description: UUIDv7 asset identifier when kind is `asset`.
+
+    CommandAcknowledgementResponse:
+      type: object
+      required: [command_id, status]
+      properties:
+        command_id:
+          type: string
+          format: uuid
+          description: UUIDv7 command identifier.
+        status:
+          type: string
+          enum: [ACKNOWLEDGED]
+          description: Confirmed command lifecycle status.
+        acknowledged_at:
+          type: string
+          format: date-time
+          description: UTC RFC 3339 timestamp when the acknowledgement was recorded.
+
+    ExecutionResultRequest:
+      description: |
+        Reports the actual execution result for a command. Corresponds to
+        `execution-result-v1.json`.
+      type: object
+      required: [execution_attempt_id, execution_status]
+      properties:
+        execution_attempt_id:
+          type: string
+          format: uuid
+          description: UUIDv7 identifier of this specific execution attempt.
+        execution_status:
+          type: string
+          enum: [SUCCEEDED, FAILED, UNKNOWN, PARTIALLY_SUCCEEDED]
+          description: |
+            What the gateway did. Separate from verification status. `FAILED`
+            means the gateway confirmed the action did not succeed. `UNKNOWN`
+            means the gateway cannot determine the actual enforcement state
+            (e.g. crashed mid-execution). `SUCCEEDED` does not imply verification.
+        observed_enforcement_state:
+          type: object
+          nullable: true
+          description: |
+            What the gateway observed about the enforcement state at completion.
+            Null if the state could not be determined.
+          additionalProperties: true
+        result_reference:
+          type: string
+          nullable: true
+          description: Reference to detailed execution output or logs (e.g. object storage URI).
+
+    ExecutionResultResponse:
+      type: object
+      required: [command_id, execution_attempt_id, execution_status, received_at]
+      properties:
+        command_id:
+          type: string
+          format: uuid
+          description: UUIDv7 command identifier.
+        execution_attempt_id:
+          type: string
+          format: uuid
+          description: UUIDv7 execution attempt identifier.
+        execution_status:
+          type: string
+          enum: [SUCCEEDED, FAILED, UNKNOWN, PARTIALLY_SUCCEEDED]
+          description: Recorded execution status.
+        verification_status:
+          type: string
+          enum: [PENDING, VERIFIED, NOT_VERIFIED, UNKNOWN]
+          description: |
+            Independent confirmation that the intended enforcement state exists.
+            Set only by the response verification service, not the gateway.
+            `PENDING` until verification is attempted.
+        received_at:
+          type: string
+          format: date-time
+          description: UTC RFC 3339 timestamp when the result was received.
+
+    GatewayConfiguration:
+      description: |
+        Authorized configuration for the gateway, including sensor configs,
+        detection rules version, and policy version.
+      type: object
+      required: [config_version, sensors, detection_rules_version, policy_version_id]
+      properties:
+        config_version:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Monotonic configuration version.
+        sensors:
+          type: array
+          description: Per-sensor configuration.
+          items:
+            $ref: '#/components/schemas/SensorConfig'
+        detection_rules_version:
+          type: string
+          description: Version of the active detection ruleset.
+          example: 2026.11.06
+        policy_version_id:
+          type: string
+          format: uuid
+          description: UUIDv7 identifier of the effective policy version.
+        updated_at:
+          type: string
+          format: date-time
+          description: UTC RFC 3339 timestamp when this configuration was last updated.
+
+    SensorConfig:
+      type: object
+      required: [name, instance_id, enabled]
+      properties:
+        name:
+          type: string
+          description: Sensor identifier from the approved allowlist.
+          example: zeek
+        instance_id:
+          type: string
+          description: Stable identifier for this sensor instance.
+        enabled:
+          type: boolean
+          description: Whether this sensor should be active on the gateway.
+        config:
+          type: object
+          description: Sensor-specific configuration values.
+          additionalProperties: true

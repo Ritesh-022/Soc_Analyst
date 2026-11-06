@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.ascense.example/contracts/investigation/investigation-result-v1.json",
+  "title": "Investigation Result v1",
+  "description": "AI or analyst investigation result with evidence references and action proposals.",
+  "type": "object",
+  "required": [
+    "investigation_id",
+    "incident_id",
+    "status"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "investigation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "incident_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "PENDING",
+        "RUNNING",
+        "COMPLETED",
+        "CANCELLED",
+        "FAILED"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "assessment": {
+      "type": "object",
+      "properties": {
+        "classification": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "uncertainties": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "description": "Must refer to real, retrievable, authorized evidence records.",
+      "items": {
+        "type": "object",
+        "required": [
+          "evidence_id"
+        ],
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "supports": {
+            "type": "string",
+            "description": "How this evidence supports the assessment"
+          }
+        }
+      }
+    },
+    "recommendations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "action_type": {
+            "type": "string"
+          },
+          "target": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "network_indicator",
+                  "asset",
+                  "domain_indicator"
+                ]
+              },
+              "address": {
+                "type": "string"
+              },
+              "direction": {
+                "type": "string",
+                "enum": [
+                  "egress",
+                  "ingress",
+                  "both"
+                ]
+              },
+              "gateway_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "protocol": {
+                "type": "string"
+              },
+              "ports": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 65535
+                }
+              },
+              "asset_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          },
+          "affected_asset_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "requires_approval": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completed_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

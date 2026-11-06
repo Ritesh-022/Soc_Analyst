@@ -1,0 +1,257 @@
+# contracts/common/errors.yaml
+# Ascense Error Codes and Conventions
+# ---------------------------------------------------------------------------
+# RFC 9457 Problem Details structure and shared error code registry.
+# See docs/02_CONTRACTS_AND_IDENTIFIERS.md for the narrative specification.
+# ---------------------------------------------------------------------------
+
+version: "1.0"
+updated: "2026-11-06"
+status: frozen
+
+# ---------------------------------------------------------------------------
+# RFC 9457 Problem Details structure
+# ---------------------------------------------------------------------------
+problem_details:
+  content_type: "application/problem+json"
+  description: >
+    All error responses use RFC 9457 Problem Details. Never return stack
+    traces, secrets, internal prompts, database queries, or another tenant's
+    data in an error response.
+  required_fields:
+    - type
+    - title
+    - status
+  field_descriptions:
+    type: "URI reference identifying the problem type"
+    title: "Short human-readable summary"
+    status: "HTTP status code (int)"
+  optional_fields:
+    detail: "Human-readable explanation specific to this occurrence"
+    instance: "URI reference identifying the specific occurrence"
+    trace_id: "W3C 32-char hex trace identifier"
+    request_id: "UUIDv7 request identifier"
+    error_code: "Machine-readable error code from the registry below"
+    errors: "Array of field-level validation errors"
+  example:
+    type: "https://api.ascense.example/problems/tenant-access-denied"
+    title: "Tenant access denied"
+    status: 403
+    detail: "The requested resource is not accessible."
+    instance: "/api/v1/incidents/0198e72f-..."
+    error_code: "TENANT_ACCESS_DENIED"
+    request_id: "0198e733-..."
+
+# ---------------------------------------------------------------------------
+# HTTP status code rules
+# ---------------------------------------------------------------------------
+http_status_rules:
+  - code: 400
+    meaning: "Malformed request or validation failure"
+  - code: 401
+    meaning: "Authentication absent or invalid"
+  - code: 403
+    meaning: >
+      Authenticated caller lacks permission. Use for cross-tenant resources too
+      — return 403, not a concealed 404, for resources that exist but are not
+      accessible.
+  - code: 404
+    meaning: "Resource not found"
+  - code: 409
+    meaning: "State conflict, duplicate operation, or stale state"
+  - code: 413
+    meaning: "Payload too large"
+  - code: 422
+    meaning: "Structurally valid request that fails domain validation"
+  - code: 429
+    meaning: "Rate limit exceeded"
+  - code: 500
+    meaning: "Internal server error (never expose details)"
+  - code: 503
+    meaning: "Service temporarily unavailable (e.g. database down)"
+
+# ---------------------------------------------------------------------------
+# Error code registry
+# ---------------------------------------------------------------------------
+error_codes:
+  # --- Authentication / Authorization ---
+  UNAUTHENTICATED:
+    http_status: 401
+    description: "Authentication is absent or invalid"
+
+  FORBIDDEN:
+    http_status: 403
+    description: "Authenticated caller lacks permission"
+
+  TENANT_ACCESS_DENIED:
+    http_status: 403
+    description: "Cross-tenant access attempted. Return 403, not 404, for resources that exist but are not accessible."
+
+  GATEWAY_MISMATCH:
+    http_status: 403
+    description: "The gateway_id in the URL does not match the authenticated certificate identity"
+
+  TENANT_MISMATCH:
+    http_status: 403
+    description: "The tenantid in the payload does not match the authenticated gateway's tenant"
+
+  # --- Event ingestion ---
+  INVALID_EVENT_SCHEMA:
+    http_status: 422
+    description: "Event failed schema validation (e.g. missing required field, invalid format)"
+
+  DUPLICATE_EVENT:
+    http_status: 200
+    description: "Event with the same (source, id) pair already received. Not an error — deduplicated silently."
+
+  UNSUPPORTED_EVENT_TYPE:
+    http_status: 422
+    description: "Event type not in the approved allowlist"
+
+  EVENT_TIMESTAMP_MISSING:
+    http_status: 422
+    description: "Event is missing the required timestamp field"
+
+  EVENT_BATCH_TOO_LARGE:
+    http_status: 413
+    description: "Event batch exceeds the maximum allowed size"
+
+  EVENT_TIMESTAMP_OUT_OF_RANGE:
+    http_status: 422
+    description: "Event timestamp is too far in the past or future (clock skew)"
+
+  # --- Gateway ---
+  GATEWAY_NOT_FOUND:
+    http_status: 404
+    description: "Gateway does not exist or is not registered"
+
+  GATEWAY_REVOKED:
+    http_status: 403
+    description: "Gateway certificate has been revoked"
+
+  ENROLLMENT_TOKEN_INVALID:
+    http_status: 403
+    description: "Enrollment token is invalid, expired, or already used"
+
+  ENROLLMENT_TOKEN_EXPIRED:
+    http_status: 403
+    description: "Enrollment token has expired"
+
+  # --- Response safety ---
+  COMMAND_EXPIRED:
+    http_status: 409
+    description: "Command has expired and cannot be executed"
+
+  COMMAND_REPLAYED:
+    http_status: 409
+    description: "Command nonce or idempotency key has already been used (replay attempt)"
+
+  COMMAND_SIGNATURE_INVALID:
+    http_status: 403
+    description: "Command cryptographic signature verification failed"
+
+  COMMAND_UNAUTHORIZED:
+    http_status: 403
+    description: "Command is not authorized for this tenant or gateway"
+
+  POLICY_CHANGED_AFTER_APPROVAL:
+    http_status: 409
+    description: "Policy version or asset criticality changed after approval but before execution"
+
+  APPROVAL_EXPIRED:
+    http_status: 409
+    description: "Approval has expired and can no longer authorize a command"
+
+  APPROVAL_REVOKED:
+    http_status: 409
+    description: "Approval has been revoked"
+
+  SELF_APPROVAL_FORBIDDEN:
+    http_status: 403
+    description: "A user cannot approve their own high-impact proposal"
+
+  PROPOSAL_EXPIRED:
+    http_status: 409
+    description: "Proposal has expired"
+
+  # --- State conflicts ---
+  RESOURCE_NOT_FOUND:
+    http_status: 404
+    description: "Requested resource not found"
+
+  STATE_CONFLICT:
+    http_status: 409
+    description: "Request conflicts with the current state of the resource"
+
+  DUPLICATE_OPERATION:
+    http_status: 409
+    description: "Operation has already been performed"
+
+  # --- Rate limiting ---
+  RATE_LIMIT_EXCEEDED:
+    http_status: 429
+    description: "Rate limit exceeded"
+
+  # --- Internal ---
+  INTERNAL_ERROR:
+    http_status: 500
+    description: "Internal server error (never expose details to the client)"
+
+  SERVICE_UNAVAILABLE:
+    http_status: 503
+    description: "Service temporarily unavailable"
+
+# ---------------------------------------------------------------------------
+# Pagination conventions
+# ---------------------------------------------------------------------------
+pagination:
+  type: cursor-based
+  query_params:
+    limit:
+      type: integer
+      minimum: 1
+      maximum: 200
+      default: 50
+      description: "Maximum number of results to return"
+    cursor:
+      type: string
+      required: false
+      description: "Opaque pagination cursor returned by a previous response"
+  response_fields:
+    next_cursor:
+      type: string
+      nullable: true
+      description: "Cursor for the next page. Null when no more results."
+  ordering: "Document stable cursor ordering per endpoint. Do not assume events arrive in timestamp order."
+
+# ---------------------------------------------------------------------------
+# Timestamp conventions
+# ---------------------------------------------------------------------------
+timestamps:
+  format: "RFC 3339 (UTC)"
+  example: "2026-11-06T06:30:00Z"
+  rules:
+    - "All timestamps are UTC"
+    - "Use RFC 3339 format with 'Z' suffix"
+    - "Do not use local time zones"
+    - "Event occurrence time (time field in CloudEvents) is the sensor's observation time"
+    - "Ingestion attaches received_at separately"
+
+# ---------------------------------------------------------------------------
+# Retry and idempotency conventions
+# ---------------------------------------------------------------------------
+retry_conventions:
+  idempotency_key:
+    header: "Idempotency-Key"
+    description: >
+      Required for operations with side effects. The server stores the key
+      for a defined duration and returns the original result on retry.
+    scope: "Per-tenant, per-operation"
+    storage_duration: "At least 24 hours"
+  backoff:
+    initial_delay: "1 second"
+    max_delay: "60 seconds"
+    multiplier: 2
+    max_retries: 5
+  dead_letter:
+    description: "Messages that fail after max retries go to a dead-letter queue for inspection"

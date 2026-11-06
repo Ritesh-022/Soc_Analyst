@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.ascense.example/contracts/gateway/gateway-heartbeat-v1.json",
+  "title": "Gateway Heartbeat v1",
+  "description": "Gateway heartbeat reporting liveness and per-sensor health.",
+  "type": "object",
+  "required": [
+    "gateway_id",
+    "sent_at",
+    "sensors"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "gateway_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "sent_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "config_version": {
+      "type": "integer",
+      "format": "int64",
+      "minimum": 0
+    },
+    "sensors": {
+      "type": "array",
+      "items": {
+        "$ref": "https://schemas.ascense.example/contracts/gateway/sensor-status-v1.json"
+      }
+    },
+    "system": {
+      "type": "object",
+      "properties": {
+        "cpu_percent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "memory_percent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "disk_percent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "uptime_seconds": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}
