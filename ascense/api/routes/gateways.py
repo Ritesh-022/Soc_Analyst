@@ -183,6 +183,7 @@ async def create_enrollment_token(
         status="ENROLLMENT_PENDING",
     )
     session.add(gateway)
+    await session.flush()
 
     # Create the enrollment token
     token = EnrollmentToken(
@@ -428,4 +429,3 @@ async def get_gateway_configuration(
         "event_batch_size": 100,
         "event_batch_timeout_ms": 5000,
     }
-

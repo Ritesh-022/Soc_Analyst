@@ -436,8 +436,50 @@ class PolicyVersion(Base, TenantMixin):
 
 
 # ---------------------------------------------------------------------------
-# Transactional Outbox
+# Execution Journal (gateway-side, durable record before action)
 # ---------------------------------------------------------------------------
+
+class ExecutionJournal(Base):
+    """Durable record created BEFORE the gateway performs any action.
+
+    The gateway writes this record before executing a command. On
+    reconnection after a crash, the gateway reads the journal to
+    determine what was already done and avoid re-executing.
+
+    Idempotency: the gateway checks this journal by idempotency_key
+    before executing. If a journal entry exists with execution_status
+    SUCCEEDED, the gateway does not re-execute.
+    """
+
+    __tablename__ = "execution_journal"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    command_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("commands.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    gateway_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(256), nullable=False, unique=True)
+    command_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    action_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    target: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    # Status of the journal entry, not the execution attempt
+    # PENDING -> EXECUTING -> COMPLETED / FAILED / ROLLED_BACK
+    journal_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="PENDING"
+    )
+    # What the gateway actually did
+    execution_result: Mapped[dict | None] = mapped_column(JSONB)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 class Outbox(Base):
     """Outbox record written in the same transaction as the event.

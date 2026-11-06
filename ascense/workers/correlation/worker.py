@@ -81,6 +81,7 @@ async def _get_or_create_incident(
             evidence_ids=[],
         )
         session.add(incident)
+        await session.flush()
 
     return incident
 

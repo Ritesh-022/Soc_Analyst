@@ -45,10 +45,20 @@ class Settings:
     # Auth
     JWT_ISSUER: str = os.getenv("JWT_ISSUER", "https://auth.ascense.example")
     JWT_AUDIENCE: str = os.getenv("JWT_AUDIENCE", "ascense-api")
+    # JWKS endpoint for OIDC RS256 token validation
+    # Set to your IdP's discovery endpoint (e.g. https://auth.ascense.example/.well-known/jwks.json)
+    JWKS_URL: str = os.getenv("JWKS_URL", "")
     # In development, we allow a simple shared secret for testing
     DEV_AUTH_SECRET: str = os.getenv("DEV_AUTH_SECRET", "dev-secret-change-me")
 
+    # Command signing — HMAC-SHA256 key used to sign commands sent to gateways
+    # In production, use a 256-bit random key (e.g. openssl rand -hex 32)
+    COMMAND_SIGNING_KEY: str = os.getenv(
+        "COMMAND_SIGNING_KEY", "dev-command-signing-key-change-in-production"
+    )
+
     # Gateway mTLS
+    # Path to the CA certificate PEM file used to verify gateway client certificates
     GATEWAY_CA_CERT: str = os.getenv("GATEWAY_CA_CERT", "")
 
     # Contracts directory

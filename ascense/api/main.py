@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
 from ascense.api.middleware.audit import AuditMiddleware
+from ascense.api.middleware.mtls import GatewayMTLSMiddleware
 from ascense.api.middleware.tenant import TenantMiddleware
 from ascense.api.middleware.tracing import TracingMiddleware
 from ascense.api.routes import (
@@ -118,6 +119,7 @@ def create_app() -> FastAPI:
     )
 
     app.add_middleware(TracingMiddleware)
+    app.add_middleware(GatewayMTLSMiddleware)
     app.add_middleware(TenantMiddleware)
     app.add_middleware(AuditMiddleware)
 

@@ -24,7 +24,10 @@ import pytest
 import pytest_asyncio
 
 # Skip the whole module if no database is available
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.asyncio(loop_scope="session"),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -48,7 +51,7 @@ def anyio_backend():
     return "asyncio"
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest_asyncio.fixture(scope="module", loop_scope="session")
 async def app_client():
     """Provide an httpx.AsyncClient wrapping the FastAPI app in-process."""
     try:
@@ -70,8 +73,8 @@ async def app_client():
         pytest.skip("httpx or ascense not importable — run `pip install -e .[dev]`")
 
 
-@pytest_asyncio.fixture(scope="module")
-async def two_tenants(app_client):
+@pytest_asyncio.fixture(scope="module", loop_scope="session")
+async def two_tenants():
     """Create two isolated tenants with users and return their IDs."""
     from uuid import uuid7
 
@@ -120,7 +123,6 @@ async def two_tenants(app_client):
 # Tenant isolation tests
 # ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
 async def test_user_cannot_see_other_tenant_gateways(app_client, two_tenants):
     """User A listing gateways must not see Tenant B's gateways."""
     # Create a gateway for Tenant B
@@ -149,7 +151,6 @@ async def test_user_cannot_see_other_tenant_gateways(app_client, two_tenants):
     assert str(gw_id) not in ids
 
 
-@pytest.mark.asyncio
 async def test_direct_access_to_other_tenant_gateway_returns_403(app_client, two_tenants):
     """Accessing another tenant's gateway directly returns 403, not 404."""
     from uuid import uuid7
@@ -175,7 +176,6 @@ async def test_direct_access_to_other_tenant_gateway_returns_403(app_client, two
     assert resp.status_code == 403
 
 
-@pytest.mark.asyncio
 async def test_direct_access_to_other_tenant_event_returns_403(app_client, two_tenants):
     """Accessing another tenant's event directly returns 403."""
     from datetime import datetime
@@ -193,6 +193,7 @@ async def test_direct_access_to_other_tenant_event_returns_403(app_client, two_t
             name="GW",
             status="ACTIVE",
         ))
+        await session.flush()
         session.add(Event(
             id=ev_id,
             tenant_id=UUID(two_tenants["tenant_b"]),
@@ -223,7 +224,6 @@ async def test_direct_access_to_other_tenant_event_returns_403(app_client, two_t
     assert resp.status_code == 403
 
 
-@pytest.mark.asyncio
 async def test_direct_access_to_other_tenant_alert_returns_403(app_client, two_tenants):
     """Accessing another tenant's alert directly returns 403."""
     from uuid import uuid7
@@ -255,7 +255,6 @@ async def test_direct_access_to_other_tenant_alert_returns_403(app_client, two_t
     assert resp.status_code == 403
 
 
-@pytest.mark.asyncio
 async def test_unauthenticated_request_returns_401(app_client):
     """Requests without auth context return 401."""
     resp = await app_client.get("/api/v1/gateways")
@@ -263,7 +262,6 @@ async def test_unauthenticated_request_returns_401(app_client):
     assert resp.status_code in (401, 403)
 
 
-@pytest.mark.asyncio
 async def test_list_endpoints_are_tenant_scoped(app_client, two_tenants):
     """List endpoints must only return items belonging to the requesting tenant."""
     from uuid import uuid7
@@ -295,7 +293,6 @@ async def test_list_endpoints_are_tenant_scoped(app_client, two_tenants):
     assert str(inc_id) not in ids
 
 
-@pytest.mark.asyncio
 async def test_payload_tenant_id_ignored_uses_auth_context(app_client, two_tenants):
     """Even if a request body contains tenant_id, it must be ignored.
     The backend always uses tenant from auth context."""

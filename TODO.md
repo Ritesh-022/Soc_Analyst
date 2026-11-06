@@ -105,14 +105,14 @@
 
 ### Platform API — foundation ✅
 - [x] FastAPI app skeleton (`ascense/api/main.py`) with lifespan, middleware, routers
-- [x] Tenant context middleware (`TenantMiddleware`) — derives tenant from `X-Tenant-ID` header (dev mode)
+- [x] Tenant context middleware — production tenant selection is checked against authenticated membership; development header bypass remains dev-only
 - [x] RBAC authorization middleware (`require_role` dependency factory)
 - [x] RFC 9457 error response format (`ProblemResponse` in `tenant.py`)
 - [x] W3C `traceparent` propagation (`TracingMiddleware`)
 - [x] `X-Request-ID` header handling
 - [x] Structured logging (`structlog`) with `tenant_id`, `trace_id`, `request_id`
 - [x] Audit middleware (`AuditMiddleware`)
-- [ ] OIDC authentication integration — currently dev header only (`X-User-ID`), no real JWT validation
+- [x] OIDC RS256 validation against JWKS and local user mapping by external issuer/subject
 - [x] `GET /api/v1/me` — returns current user and memberships
 - [x] `GET /api/v1/tenants/current` — returns active tenant context (derived from auth, not payload)
 - [x] `GET /api/v1/tenants/current/memberships` — lists tenant users and roles
@@ -137,7 +137,7 @@
 - [x] Broker topology setup wired to app lifespan startup
 
 ### Stage 2 exit condition
-- [ ] Automated test: user can authenticate *(blocked by missing OIDC)*
+- [x] Automated tests: RS256 claim validation, registered OIDC subject mapping, and tenant-membership enforcement
 - [ ] Automated test: gateway can enroll *(enrollment endpoint implemented, needs test)*
 - [x] Automated test: one tenant cannot access another tenant's resources (`tests/integration/test_tenant_isolation.py`)
 - [x] Row-level security policies written (`database/policies/rls.sql`) — apply with `make apply-rls`
@@ -403,7 +403,7 @@
 
 1. **Run `make docker-up && make migrate && make apply-rls && make seed`** — stand up the full stack and apply RLS policies
 2. **`pytest tests/integration/`** — run end-to-end tests against the live stack
-3. **OIDC provider** — configure `JWT_ISSUER` and `JWT_AUDIENCE` in `.env`; complete `_decode_oidc_token` in `ascense/api/middleware/auth.py`
+3. **OIDC deployment** — configure `JWT_ISSUER`, `JWT_AUDIENCE`, and `JWKS_URL`; provision user issuer/subject mappings and validate with a real provider token
 4. **Rate-of-change policy check** — add Redis counter for per-tenant action rate limiting
 5. **Approval notification** — email/Slack/WhatsApp webhook on approval request
 6. **LangGraph investigation agent** — wire Ollama/OpenAI into `ascense/workers/investigation/worker.py`

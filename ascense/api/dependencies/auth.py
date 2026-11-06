@@ -7,7 +7,8 @@ changing request JSON.
 Authentication flow:
   1. Dev mode (ASCENSE_ENV=development): X-User-ID header accepted
   2. Dev/production: Bearer JWT token (HS256 in dev, RS256 via OIDC in prod)
-  3. Production only: OIDC RS256 token validated against JWKS endpoint
+  3. Production only: OIDC subject mapped by issuer and subject to a local user
+  4. Tenant context validated against that user's membership
 
 Use generate_dev_token() from ascense.api.middleware.auth to create
 tokens for testing when running without a real OIDC provider.
@@ -33,6 +34,7 @@ _IS_DEV = _settings.ENVIRONMENT == "development"
 
 async def get_current_user_id(
     request: Request,
+    session: AsyncSession = Depends(get_session),
     x_user_id: str | None = Header(None, alias="X-User-ID"),
 ) -> UUID:
     """Extract the authenticated user ID from the request.
@@ -61,13 +63,11 @@ async def get_current_user_id(
             ) from exc
 
     # Try Bearer token via auth middleware
-    try:
-        from ascense.api.middleware.auth import resolve_user_from_token
-        user_id = await resolve_user_from_token(request)
-        if user_id:
-            return user_id
-    except Exception:  # noqa: BLE001 — auth middleware failure is non-fatal
-        logger.debug("auth.bearer_token_resolution_failed")
+    from ascense.api.middleware.auth import resolve_user_from_token
+
+    user_id = await resolve_user_from_token(request, session)
+    if user_id:
+        return user_id
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -91,7 +91,7 @@ async def get_tenant_id(request: Request) -> UUID:
             status_code=status.HTTP_403_FORBIDDEN,
             detail=(
                 "Tenant context required. "
-                "Provide X-Tenant-ID header (dev) or a tenant-scoped JWT."
+                "A verified tenant membership is required."
             ),
         )
     try:

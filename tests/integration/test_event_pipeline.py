@@ -19,7 +19,10 @@ from uuid import UUID
 import pytest
 import pytest_asyncio
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.asyncio(loop_scope="session"),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -31,7 +34,7 @@ def anyio_backend():
     return "asyncio"
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest_asyncio.fixture(scope="module", loop_scope="session")
 async def db_session():
     """Provide a database session for setup/teardown."""
     try:
@@ -42,7 +45,7 @@ async def db_session():
         pytest.skip(f"Database not available: {exc}")
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest_asyncio.fixture(scope="module", loop_scope="session")
 async def seeded_tenant(db_session):
     """Create a test tenant, user, and gateway."""
     from uuid import uuid7
@@ -54,6 +57,7 @@ async def seeded_tenant(db_session):
     gateway_id = uuid7()
 
     db_session.add(Tenant(id=tenant_id, name="Pipeline Test Tenant"))
+    await db_session.flush()
     db_session.add(User(id=user_id, display_name="Pipeline User", email="pipeline@test.example"))
     db_session.add(Membership(id=uuid7(), user_id=user_id, tenant_id=tenant_id, role="admin"))
     db_session.add(Gateway(
@@ -71,7 +75,7 @@ async def seeded_tenant(db_session):
     }
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest_asyncio.fixture(scope="module", loop_scope="session")
 async def app_client():
     """Provide an httpx.AsyncClient wrapping the FastAPI app in-process."""
     try:
@@ -91,7 +95,6 @@ async def app_client():
 # Stage 3A: Event ingestion and retrieval
 # ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
 async def test_event_ingestion_and_retrieval(app_client, seeded_tenant):
     """Stage 3A exit: event sent → stored → retrieved → trace_id visible."""
     tenant_id = seeded_tenant["tenant_id"]
@@ -154,7 +157,6 @@ async def test_event_ingestion_and_retrieval(app_client, seeded_tenant):
     assert stored["gateway_id"] == gateway_id
 
 
-@pytest.mark.asyncio
 async def test_duplicate_event_is_deduplicated(app_client, seeded_tenant):
     """Same (source, id) pair submitted twice must be deduplicated."""
     tenant_id = seeded_tenant["tenant_id"]
@@ -206,7 +208,6 @@ async def test_duplicate_event_is_deduplicated(app_client, seeded_tenant):
     assert count == 1, f"Expected 1 event after dedup, got {count}"
 
 
-@pytest.mark.asyncio
 async def test_unsupported_event_type_rejected(app_client, seeded_tenant):
     """Events with unsupported types must be rejected with UNSUPPORTED_EVENT_TYPE."""
     tenant_id = seeded_tenant["tenant_id"]
@@ -243,7 +244,6 @@ async def test_unsupported_event_type_rejected(app_client, seeded_tenant):
 # Stage 3B: Detection pipeline
 # ---------------------------------------------------------------------------
 
-@pytest.mark.asyncio
 async def test_suspicious_event_produces_finding(seeded_tenant):
     """Stage 3B: suspicious event → detection finding created by detection worker."""
     from uuid import uuid7
@@ -292,7 +292,6 @@ async def test_suspicious_event_produces_finding(seeded_tenant):
     assert findings[0].severity == "high"
 
 
-@pytest.mark.asyncio
 async def test_detection_pipeline_finding_to_alert_to_incident(seeded_tenant):
     """Stage 3B: finding → alert → incident (correlation worker in-process)."""
     from uuid import uuid7
