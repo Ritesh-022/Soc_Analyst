@@ -68,6 +68,18 @@ async def _telemetry_stale_job() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Validate production configuration before starting
+    from ascense.config import get_settings
+    _settings = get_settings()
+    _errors = _settings.validate_production()
+    if _errors:
+        for err in _errors:
+            logger.error("config.production_check_failed", error=err)
+        raise RuntimeError(
+            "Production configuration validation failed: "
+            + "; ".join(_errors)
+        )
+
     await setup_broker()
     publisher_task = asyncio.create_task(run_publisher())
     stale_task = asyncio.create_task(_telemetry_stale_job())

@@ -124,6 +124,9 @@ async def ingest_event_batch(
     accepted = 0
     rejections: list[dict] = []
 
+    authenticated_tenant_id = getattr(request.state, "tenant_id", None)
+    authenticated_gateway_id = getattr(request.state, "gateway_id", None)
+
     for i, event in enumerate(batch):
         # Validate batch size limit
         if i >= MAX_BATCH_SIZE:
@@ -201,25 +204,53 @@ async def ingest_event_batch(
             accepted += 1
             continue
 
-        # Derive tenant_id from authenticated gateway (not from payload)
-        # In production, this comes from mTLS certificate validation
-        # For now, derive from request state or the event payload (to be replaced)
-        tenant_id_str = request.state.tenant_id or event.tenantid
-        if not tenant_id_str:
+        # Prefer the authenticated identity when present, but retain a dev/test
+        # fallback for local execution where the gateway identity is not yet
+        # established via mTLS. When the trusted gateway context exists, the
+        # payload values are still validated against it and rejected on mismatch.
+        tenant_id_str = authenticated_tenant_id or event.tenantid
+        gateway_id_str = authenticated_gateway_id or event.gatewayid
+
+        if not tenant_id_str or not gateway_id_str:
             rejections.append({
                 "index": i,
                 "code": "UNAUTHENTICATED",
-                "message": "No tenant context available from authenticated gateway.",
+                "message": "Authenticated gateway context required for event ingestion.",
+            })
+            continue
+
+        if authenticated_tenant_id and event.tenantid and event.tenantid != tenant_id_str:
+            rejections.append({
+                "index": i,
+                "code": "TENANT_MISMATCH",
+                "message": "tenantid in payload does not match the authenticated gateway tenant.",
+            })
+            continue
+
+        if authenticated_gateway_id and event.gatewayid and event.gatewayid != gateway_id_str:
+            rejections.append({
+                "index": i,
+                "code": "GATEWAY_ID_MISMATCH",
+                "message": "gatewayid in payload does not match the authenticated gateway.",
+            })
+            continue
+
+        if not event.source.startswith(f"urn:ascense:gateway:{gateway_id_str}/"):
+            rejections.append({
+                "index": i,
+                "code": "GATEWAY_ID_MISMATCH",
+                "message": "Source URN does not match the authenticated gateway identity.",
             })
             continue
 
         try:
             tenant_id = UUID(tenant_id_str)
+            gateway_id = UUID(gateway_id_str)
         except (ValueError, TypeError):
             rejections.append({
                 "index": i,
-                "code": "TENANT_MISMATCH",
-                "message": "Invalid tenant identity.",
+                "code": "UNAUTHENTICATED",
+                "message": "Invalid authenticated gateway identity.",
             })
             continue
 
@@ -230,11 +261,7 @@ async def ingest_event_batch(
             source_event_id=source_event_id,
             source=event.source,
             event_type=event.type,
-            gateway_id=(
-                UUID(event.gatewayid)
-                if event.gatewayid
-                else UUID("00000000-0000-7000-8000-000000000000")
-            ),
+            gateway_id=gateway_id,
             sensor_name=sensor_info.get("name", "unknown"),
             sensor_instance_id=sensor_info.get("instance_id", "unknown"),
             event_kind=data.get("event_kind", "network.connection"),

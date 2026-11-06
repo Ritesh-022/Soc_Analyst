@@ -161,7 +161,7 @@
 - [x] Transactional outbox write (event + outbox record in one transaction)
 - [x] `202 Accepted` response with `accepted_count`, `rejected_count`, per-item rejection detail
 - [x] Payload size limits enforced (MAX_BATCH_SIZE=1000, MAX_PAYLOAD_BYTES=10MB)
-- [ ] `tenantid`/`gatewayid` verified against authenticated gateway identity — currently trusts `X-Tenant-ID` header (dev mode only)
+- [x] `tenantid`/`gatewayid` verified against authenticated gateway identity — route rejects payload mismatches and enforces authenticated gateway context
 
 ### Normalization worker ✅
 - [x] Normalization worker (`ascense/workers/ingestion/worker.py`) — consumes `telemetry.batch.accepted.v1` from RabbitMQ

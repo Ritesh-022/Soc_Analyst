@@ -1,16 +1,16 @@
 -- database/policies/rls.sql
 -- Row-Level Security policies for tenant-owned tables.
 --
--- Every tenant-owned table gets:
---   1. ENABLE ROW LEVEL SECURITY
---   2. A policy that allows the application role to see only rows
---      matching the current tenant context (set via SET LOCAL).
+-- FAIL-CLOSED: if app.tenant_id is not set, NO rows are visible.
+-- This prevents accidental cross-tenant access when the API forgets
+-- to set the tenant context.
 --
--- The API sets the tenant context per-request using:
+-- The API sets the tenant context per-transaction using:
 --   SET LOCAL app.tenant_id = '<uuid>';
 --
--- This provides defense-in-depth: even if the API forgets to filter
--- by tenant_id, RLS prevents cross-tenant data leakage.
+-- A restricted application role should be used (separate from the
+-- migration owner / superuser). Superusers bypass RLS by default in
+-- PostgreSQL, so the application role must NOT be a superuser.
 --
 -- Run once after migrations:
 --   psql "$DATABASE_URL" -f database/policies/rls.sql
@@ -33,79 +33,68 @@ ALTER TABLE policy_versions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE outbox ENABLE ROW LEVEL SECURITY;
 ALTER TABLE gateway_certificates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE memberships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE execution_journal ENABLE ROW LEVEL SECURITY;
 
--- Create a helper function to read the current tenant context
+-- Helper function: returns the tenant_id from the session context.
+-- Returns NULL if not set — policies below fail-closed on NULL.
 CREATE OR REPLACE FUNCTION current_tenant_id() RETURNS uuid AS $$
   SELECT NULLIF(current_setting('app.tenant_id', true), '')::uuid;
 $$ LANGUAGE sql STABLE;
 
--- Policies: application role can see rows matching the current tenant
--- or all rows if no tenant context is set (for superuser/admin operations).
+-- FAIL-CLOSED policies: rows are visible ONLY when tenant_id matches.
+-- If current_tenant_id() returns NULL, no rows are returned.
+-- This is the opposite of fail-open — missing context = no access.
 
--- Gateways
 CREATE POLICY tenant_isolation ON gateways
-  USING (current_tenant_id() IS NULL OR tenant_id = current_tenant_id());
+  USING (tenant_id = current_tenant_id());
 
--- Enrollment tokens
 CREATE POLICY tenant_isolation ON enrollment_tokens
-  USING (current_tenant_id() IS NULL OR tenant_id = current_tenant_id());
+  USING (tenant_id = current_tenant_id());
 
--- Assets
 CREATE POLICY tenant_isolation ON assets
-  USING (current_tenant_id() IS NULL OR tenant_id = current_tenant_id());
+  USING (tenant_id = current_tenant_id());
 
--- Events
 CREATE POLICY tenant_isolation ON events
-  USING (current_tenant_id() IS NULL OR tenant_id = current_tenant_id());
+  USING (tenant_id = current_tenant_id());
 
--- Detection findings
 CREATE POLICY tenant_isolation ON detection_findings
-  USING (current_tenant_id() IS NULL OR tenant_id = current_tenant_id());
+  USING (tenant_id = current_tenant_id());
 
--- Alerts
 CREATE POLICY tenant_isolation ON alerts
-  USING (current_tenant_id() IS NULL OR tenant_id = current_tenant_id());
+  USING (tenant_id = current_tenant_id());
 
--- Incidents
 CREATE POLICY tenant_isolation ON incidents
-  USING (current_tenant_id() IS NULL OR tenant_id = current_tenant_id());
+  USING (tenant_id = current_tenant_id());
 
--- Evidence
 CREATE POLICY tenant_isolation ON evidence
-  USING (current_tenant_id() IS NULL OR tenant_id = current_tenant_id());
+  USING (tenant_id = current_tenant_id());
 
--- Action proposals
 CREATE POLICY tenant_isolation ON action_proposals
-  USING (current_tenant_id() IS NULL OR tenant_id = current_tenant_id());
+  USING (tenant_id = current_tenant_id());
 
--- Approvals
 CREATE POLICY tenant_isolation ON approvals
-  USING (current_tenant_id() IS NULL OR tenant_id = current_tenant_id());
+  USING (tenant_id = current_tenant_id());
 
--- Commands
 CREATE POLICY tenant_isolation ON commands
-  USING (current_tenant_id() IS NULL OR tenant_id = current_tenant_id());
+  USING (tenant_id = current_tenant_id());
 
--- Execution attempts
 CREATE POLICY tenant_isolation ON execution_attempts
-  USING (current_tenant_id() IS NULL OR tenant_id = current_tenant_id());
+  USING (tenant_id = current_tenant_id());
 
--- Audit events
 CREATE POLICY tenant_isolation ON audit_events
-  USING (current_tenant_id() IS NULL OR tenant_id = current_tenant_id());
+  USING (tenant_id = current_tenant_id());
 
--- Policy versions
 CREATE POLICY tenant_isolation ON policy_versions
-  USING (current_tenant_id() IS NULL OR tenant_id = current_tenant_id());
+  USING (tenant_id = current_tenant_id());
 
--- Outbox
 CREATE POLICY tenant_isolation ON outbox
-  USING (current_tenant_id() IS NULL OR tenant_id = current_tenant_id());
+  USING (tenant_id = current_tenant_id());
 
--- Gateway certificates (filtered via gateway's tenant)
 CREATE POLICY tenant_isolation ON gateway_certificates
-  USING (current_tenant_id() IS NULL OR tenant_id = current_tenant_id());
+  USING (tenant_id = current_tenant_id());
 
--- Memberships (filtered by tenant_id)
 CREATE POLICY tenant_isolation ON memberships
-  USING (current_tenant_id() IS NULL OR tenant_id = current_tenant_id());
+  USING (tenant_id = current_tenant_id());
+
+CREATE POLICY tenant_isolation ON execution_journal
+  USING (tenant_id = current_tenant_id());

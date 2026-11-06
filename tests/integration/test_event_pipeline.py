@@ -157,6 +157,48 @@ async def test_event_ingestion_and_retrieval(app_client, seeded_tenant):
     assert stored["gateway_id"] == gateway_id
 
 
+async def test_event_ingestion_rejects_gateway_payload_mismatch(app_client, seeded_tenant):
+    """Event payload tenant/gateway claims must match the authenticated gateway."""
+    tenant_id = seeded_tenant["tenant_id"]
+    gateway_id = seeded_tenant["gateway_id"]
+    other_gateway = str(UUID("00000000-0000-7000-8000-000000000999"))
+
+    resp = await app_client.post(
+        "/edge/v1/events:batch",
+        json=[{
+            "specversion": "1.0",
+            "id": "mismatch-ev-001",
+            "source": f"urn:ascense:gateway:{gateway_id}/sensor/suricata-01",
+            "type": "com.ascense.network.connection.observed.v1",
+            "time": datetime.now(UTC).isoformat(),
+            "tenantid": tenant_id,
+            "gatewayid": other_gateway,
+            "data": {
+                "schema_version": "1.0",
+                "source_event_id": "mismatch-ev-001",
+                "event_kind": "network.connection",
+                "sensor": {"name": "suricata", "instance_id": "suricata-01"},
+                "asset_resolution": {"status": "UNRESOLVED"},
+                "network": {
+                    "source_ip": "192.0.2.22",
+                    "destination_ip": "10.0.0.6",
+                    "transport": "tcp",
+                },
+            },
+        }],
+        headers={
+            "X-Tenant-ID": tenant_id,
+            "X-Gateway-ID": gateway_id,
+            "Content-Type": "application/json",
+        },
+    )
+
+    assert resp.status_code == 202
+    assert resp.json()["accepted_count"] == 0
+    assert resp.json()["rejected_count"] == 1
+    assert resp.json()["rejections"][0]["code"] == "GATEWAY_ID_MISMATCH"
+
+
 async def test_duplicate_event_is_deduplicated(app_client, seeded_tenant):
     """Same (source, id) pair submitted twice must be deduplicated."""
     tenant_id = seeded_tenant["tenant_id"]

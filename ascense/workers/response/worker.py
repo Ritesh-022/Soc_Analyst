@@ -146,9 +146,13 @@ async def create_signed_command(
         )
     )
 
+    # Generate ONE command_id and reuse it for both signing and storage.
+    # The signature covers command_id, so the same UUID must be used for both.
+    command_id = uuid7()
+
     # Create the HMAC-SHA256 signature over all command fields
     signature = _sign_command(
-        command_id=uuid7(),  # temp — will be overwritten
+        command_id=command_id,
         tenant_id=proposal.tenant_id,
         gateway_id=gateway_id,
         action_type=proposal.action_type,
@@ -162,7 +166,7 @@ async def create_signed_command(
     )
 
     command = Command(
-        id=uuid7(),
+        id=command_id,  # same UUID used for signing
         tenant_id=proposal.tenant_id,
         gateway_id=gateway_id,
         action_type=proposal.action_type,

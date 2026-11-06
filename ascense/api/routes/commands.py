@@ -20,15 +20,17 @@ Public API:
 
 from __future__ import annotations
 
+import hmac
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ascense.api.dependencies.auth import get_tenant_id
+from ascense.config import get_settings
 from ascense.db import get_session
 from ascense.models import (
     ActionProposal,
@@ -41,6 +43,39 @@ from ascense.models import (
 from ascense.workers.response.worker import create_signed_command
 
 router = APIRouter(tags=["Commands"])
+
+
+def _auth_token_from_request(request: Request) -> str | None:
+    """Read the internal service credential from request headers."""
+    token = request.headers.get("X-Service-Token")
+    if token:
+        return token
+    auth_header = request.headers.get("Authorization", "")
+    scheme, separator, value = auth_header.partition(" ")
+    if separator and scheme.casefold() == "bearer":
+        return value
+    return None
+
+
+async def require_internal_service_auth(
+    request: Request,
+    authorization: str | None = Header(None, alias="Authorization"),
+) -> None:
+    """Require a trusted internal service credential on /internal/v1/* routes."""
+    del authorization
+    token = _auth_token_from_request(request)
+    if token is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Internal service authentication required",
+        )
+
+    expected = get_settings().INTERNAL_SERVICE_TOKEN
+    if not token or not hmac.compare_digest(token, expected):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid internal service credential",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +114,7 @@ class ExecutionResultRequest(BaseModel):
 @router.post("/internal/v1/commands", status_code=status.HTTP_201_CREATED)
 async def create_command(
     body: CreateCommandRequest,
+    _auth: None = Depends(require_internal_service_auth),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Create a signed command from an approved proposal.
@@ -143,6 +179,7 @@ async def create_command(
 @router.post("/internal/v1/commands/{command_id}/verify")
 async def trigger_verification(
     command_id: UUID,
+    _auth: None = Depends(require_internal_service_auth),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Trigger independent enforcement verification for a command.

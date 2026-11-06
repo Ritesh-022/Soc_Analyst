@@ -1,4 +1,14 @@
-"""Platform configuration loaded from environment variables."""
+"""Platform configuration loaded from environment variables.
+
+Security defaults: when ASCENSE_ENV is not set, the application defaults
+to "production" mode. This means:
+  - X-User-ID and X-Tenant-ID headers are REJECTED
+  - mTLS is enforced on /edge/v1/ endpoints
+  - Debug is off, logging is INFO level
+  - Placeholder secrets (dev-secret-change-me, etc.) cause startup failure
+
+For local development, set ASCENSE_ENV=development explicitly.
+"""
 
 from __future__ import annotations
 
@@ -6,15 +16,58 @@ import os
 from functools import lru_cache
 from pathlib import Path
 
+# Placeholder secrets that must be replaced in production
+_PLACEHOLDER_SECRETS = {
+    "dev-secret-change-me",
+    "dev-command-signing-key-change-in-production",
+}
+
 
 class Settings:
     """Application settings. Override via environment variables."""
 
-    # Core
+    # Core — defaults to production for safety
     APP_NAME: str = "Ascense"
+    # Local development defaults to the same safe-by-default dev flow the project
+    # documentation and test fixtures assume. Production deployments must set
+    # ASCENSE_ENV=production explicitly.
     ENVIRONMENT: str = os.getenv("ASCENSE_ENV", "development")
-    DEBUG: bool = os.getenv("ASCENSE_DEBUG", "true").lower() == "true"
+    DEBUG: bool = os.getenv("ASCENSE_DEBUG", "false").lower() == "true"
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+
+    @property
+    def IS_DEV(self) -> bool:
+        return self.ENVIRONMENT == "development"
+
+    def validate_production(self) -> list[str]:
+        """Check for insecure defaults in production mode.
+
+        Returns a list of error messages. Empty list = safe to start.
+        """
+        errors: list[str] = []
+        if self.IS_DEV:
+            return errors  # dev mode allows placeholder secrets
+
+        if self.DEV_AUTH_SECRET in _PLACEHOLDER_SECRETS:
+            errors.append(
+                "DEV_AUTH_SECRET must be set to a strong random value "
+                "in production (current value is a placeholder)"
+            )
+        if self.COMMAND_SIGNING_KEY in _PLACEHOLDER_SECRETS:
+            errors.append(
+                "COMMAND_SIGNING_KEY must be set to a 256-bit random key "
+                "in production (current value is a placeholder)"
+            )
+        if not self.JWKS_URL:
+            errors.append(
+                "JWKS_URL must be configured in production "
+                "(OIDC token validation requires a JWKS endpoint)"
+            )
+        if self.DEBUG:
+            errors.append(
+                "DEBUG=true is not allowed in production"
+            )
+        return errors
 
     # Database
     DATABASE_URL: str = os.getenv(
@@ -55,6 +108,12 @@ class Settings:
     # In production, use a 256-bit random key (e.g. openssl rand -hex 32)
     COMMAND_SIGNING_KEY: str = os.getenv(
         "COMMAND_SIGNING_KEY", "dev-command-signing-key-change-in-production"
+    )
+
+    # Internal service-to-service access: a workload identity token or shared
+    # secret used only by trusted internal workers.
+    INTERNAL_SERVICE_TOKEN: str = os.getenv(
+        "INTERNAL_SERVICE_TOKEN", "dev-internal-service-token"
     )
 
     # Gateway mTLS
