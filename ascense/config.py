@@ -1,7 +1,7 @@
 """Platform configuration loaded from environment variables.
 
-Security defaults: when ASCENSE_ENV is not set, the application defaults
-to "production" mode. This means:
+Security defaults: the application defaults to "production" mode unless the
+runtime explicitly sets ASCENSE_ENV=development. In production, this means:
   - X-User-ID and X-Tenant-ID headers are REJECTED
   - mTLS is enforced on /edge/v1/ endpoints
   - Debug is off, logging is INFO level
@@ -26,17 +26,15 @@ _PLACEHOLDER_SECRETS = {
 class Settings:
     """Application settings. Override via environment variables."""
 
-    # Core — defaults to production for safety
+    # Core — production is the secure default; development must be
+    # explicitly requested by setting ASCENSE_ENV=development.
     APP_NAME: str = "Ascense"
-    # Local development defaults to the same safe-by-default dev flow the project
-    # documentation and test fixtures assume. Production deployments must set
-    # ASCENSE_ENV=production explicitly.
-    ENVIRONMENT: str = os.getenv("ASCENSE_ENV", "development")
+    ENVIRONMENT: str = os.getenv("ASCENSE_ENV", "production")
     DEBUG: bool = os.getenv("ASCENSE_DEBUG", "false").lower() == "true"
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 
     @property
-    def IS_DEV(self) -> bool:
+    def is_dev(self) -> bool:
         return self.ENVIRONMENT == "development"
 
     def validate_production(self) -> list[str]:
@@ -45,7 +43,7 @@ class Settings:
         Returns a list of error messages. Empty list = safe to start.
         """
         errors: list[str] = []
-        if self.IS_DEV:
+        if self.is_dev:
             return errors  # dev mode allows placeholder secrets
 
         if self.DEV_AUTH_SECRET in _PLACEHOLDER_SECRETS:

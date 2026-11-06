@@ -7,9 +7,12 @@ development and testing on Python 3.11.
 
 from __future__ import annotations
 
+import os
 import secrets
 import time
 import uuid as _uuid_mod
+
+os.environ.setdefault("ASCENSE_ENV", "development")
 
 if not hasattr(_uuid_mod, "uuid7"):
     def _uuid7() -> _uuid_mod.UUID:
