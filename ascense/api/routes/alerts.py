@@ -10,6 +10,7 @@ Alert lifecycle: NEW → ACKNOWLEDGED → UNDER_INVESTIGATION → RESOLVED / FAL
 
 from __future__ import annotations
 
+import contextlib
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -17,8 +18,8 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ascense.db import get_session
 from ascense.api.dependencies.auth import get_tenant_id
+from ascense.db import get_session
 from ascense.models import Alert
 
 router = APIRouter(tags=["Alerts"])
@@ -50,10 +51,8 @@ async def list_alerts(
     if incident_id:
         query = query.where(Alert.incident_id == incident_id)
     if cursor:
-        try:
+        with contextlib.suppress(ValueError):
             query = query.where(Alert.id < UUID(cursor))
-        except ValueError:
-            pass
 
     query = query.order_by(Alert.id.desc()).limit(limit + 1)
     result = await session.execute(query)
@@ -144,7 +143,10 @@ async def acknowledge_alert(
     if alert.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Tenant access denied")
     if alert.status != "NEW":
-        raise HTTPException(status_code=409, detail=f"Alert is in status {alert.status}, cannot acknowledge")
+        raise HTTPException(
+            status_code=409,
+            detail=f"Alert is in status {alert.status}, cannot acknowledge",
+        )
 
     alert.status = "ACKNOWLEDGED"
     await session.commit()

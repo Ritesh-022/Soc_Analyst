@@ -21,7 +21,6 @@ Internal API:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -124,7 +123,10 @@ async def evaluate_policy(
 
     # 1. Schema check — action type must be in allowlist
     action_type = proposal.action_type
-    if action_type not in AUTOMATED_ACTION_TYPES and action_type not in HUMAN_APPROVAL_REQUIRED_TYPES:
+    if (
+        action_type not in AUTOMATED_ACTION_TYPES
+        and action_type not in HUMAN_APPROVAL_REQUIRED_TYPES
+    ):
         deny_reasons.append(f"Action type '{action_type}' is not in the approved allowlist")
         checks["schema"] = "FAIL"
     else:
@@ -174,7 +176,10 @@ async def evaluate_policy(
     # Proposals from automated sources must meet a minimum confidence threshold
     evidence_ids = proposal.evidence_ids or []
     if proposal.created_by == "investigation_agent" and len(evidence_ids) == 0:
-        deny_reasons.append("AI investigation proposals must reference at least one evidence record")
+        deny_reasons.append(
+            "AI investigation proposals must reference "
+            "at least one evidence record"
+        )
         checks["confidence"] = "FAIL"
     else:
         checks["confidence"] = "PASS"

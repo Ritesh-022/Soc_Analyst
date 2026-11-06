@@ -8,11 +8,12 @@ the backend checks authorization on every request.
 
 from __future__ import annotations
 
+from uuid import uuid7
+
 import structlog
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from uuid import uuid7
 
 logger = structlog.get_logger()
 
@@ -47,8 +48,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
             # This will be properly implemented with auth integration
             request.state.tenant_id = None
 
-        response = await call_next(request)
-        return response
+        return await call_next(request)
 
 
 class ProblemResponse(JSONResponse):

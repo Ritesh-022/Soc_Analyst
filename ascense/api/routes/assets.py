@@ -7,14 +7,15 @@ Public API:
 
 from __future__ import annotations
 
+import contextlib
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ascense.db import get_session
 from ascense.api.dependencies.auth import get_tenant_id
+from ascense.db import get_session
 from ascense.models import Asset
 
 router = APIRouter(tags=["Assets"])
@@ -32,10 +33,8 @@ async def list_assets(
 
     query = select(Asset).where(Asset.tenant_id == tenant_id)
     if cursor:
-        try:
+        with contextlib.suppress(ValueError):
             query = query.where(Asset.id < UUID(cursor))
-        except ValueError:
-            pass
 
     query = query.order_by(Asset.id.desc()).limit(limit + 1)
     result = await session.execute(query)

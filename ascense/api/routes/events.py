@@ -10,16 +10,17 @@ Deduplication uses (source, id) which maps to
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from uuid import UUID, uuid7
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ascense.db import get_session
 from ascense.api.dependencies.auth import get_tenant_id
+from ascense.db import get_session
 from ascense.models import Event, Outbox
 
 router = APIRouter(tags=["Events"])
@@ -41,9 +42,9 @@ MAX_BATCH_SIZE = 1000
 MAX_PAYLOAD_BYTES = 10 * 1024 * 1024
 
 # W3C source URN pattern: urn:ascense:gateway:{uuid}/sensor/{instance_id}
-import re
 SOURCE_URN_PATTERN = re.compile(
-    r"^urn:ascense:gateway:[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/sensor/.+$"
+    r"^urn:ascense:gateway:[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}"
+    r"-[89ab][0-9a-f]{3}-[0-9a-f]{12}/sensor/.+$"
 )
 
 
@@ -165,7 +166,10 @@ async def ingest_event_batch(
             rejections.append({
                 "index": i,
                 "code": "INVALID_EVENT_SCHEMA",
-                "message": "Source must be a valid URN: urn:ascense:gateway:{uuid}/sensor/{instance_id}",
+                "message": (
+                    "Source must be a valid URN: "
+                    "urn:ascense:gateway:{uuid}/sensor/{instance_id}"
+                ),
             })
             continue
 
@@ -226,15 +230,25 @@ async def ingest_event_batch(
             source_event_id=source_event_id,
             source=event.source,
             event_type=event.type,
-            gateway_id=UUID(event.gatewayid) if event.gatewayid else UUID("00000000-0000-7000-8000-000000000000"),
+            gateway_id=(
+                UUID(event.gatewayid)
+                if event.gatewayid
+                else UUID("00000000-0000-7000-8000-000000000000")
+            ),
             sensor_name=sensor_info.get("name", "unknown"),
             sensor_instance_id=sensor_info.get("instance_id", "unknown"),
             event_kind=data.get("event_kind", "network.connection"),
             observed_at=event.time,
             ingested_at=datetime.utcnow(),
             asset_resolution_status=asset_res.get("status", "UNRESOLVED"),
-            source_asset_id=UUID(asset_res["source_asset_id"]) if asset_res.get("source_asset_id") else None,
-            destination_asset_id=UUID(asset_res["destination_asset_id"]) if asset_res.get("destination_asset_id") else None,
+            source_asset_id=(
+                UUID(asset_res["source_asset_id"])
+                if asset_res.get("source_asset_id") else None
+            ),
+            destination_asset_id=(
+                UUID(asset_res["destination_asset_id"])
+                if asset_res.get("destination_asset_id") else None
+            ),
             data=data,
         )
         session.add(event_record)
@@ -363,7 +377,12 @@ async def get_event(
         "observed_at": event.observed_at.isoformat(),
         "ingested_at": event.ingested_at.isoformat(),
         "asset_resolution_status": event.asset_resolution_status,
-        "source_asset_id": str(event.source_asset_id) if event.source_asset_id else None,
-        "destination_asset_id": str(event.destination_asset_id) if event.destination_asset_id else None,
+        "source_asset_id": (
+            str(event.source_asset_id) if event.source_asset_id else None
+        ),
+        "destination_asset_id": (
+            str(event.destination_asset_id)
+            if event.destination_asset_id else None
+        ),
         "data": event.data,
     }

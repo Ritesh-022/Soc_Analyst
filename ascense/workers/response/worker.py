@@ -15,14 +15,13 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid7
 
 import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ascense.db import async_session_factory
 from ascense.models import ActionProposal, Approval, Command, ExecutionAttempt
 
 logger = structlog.get_logger(__name__)
@@ -49,7 +48,7 @@ async def create_signed_command(
     # Validate that the approval is still valid
     if approval.status != "APPROVED":
         raise ValueError(f"Approval is {approval.status}, not APPROVED")
-    if approval.expires_at and approval.expires_at < datetime.now(timezone.utc):
+    if approval.expires_at and approval.expires_at < datetime.now(UTC):
         raise ValueError("Approval has expired")
 
     # Generate cryptographic material
@@ -75,7 +74,7 @@ async def create_signed_command(
         nonce=nonce,
         idempotency_key=idempotency_key,
         signature=signature,
-        expires_at=datetime.now(timezone.utc) + timedelta(seconds=900),
+        expires_at=datetime.now(UTC) + timedelta(seconds=900),
     )
     session.add(command)
 

@@ -13,7 +13,7 @@ directly via the worker functions) so they run without Docker.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
@@ -46,6 +46,7 @@ async def db_session():
 async def seeded_tenant(db_session):
     """Create a test tenant, user, and gateway."""
     from uuid import uuid7
+
     from ascense.models import Gateway, Membership, Tenant, User
 
     tenant_id = uuid7()
@@ -74,8 +75,9 @@ async def seeded_tenant(db_session):
 async def app_client():
     """Provide an httpx.AsyncClient wrapping the FastAPI app in-process."""
     try:
-        import httpx
         import os
+
+        import httpx
         os.environ.setdefault("ASCENSE_RUN_WORKERS", "false")
         from ascense.api.main import create_app
         application = create_app()
@@ -107,7 +109,7 @@ async def test_event_ingestion_and_retrieval(app_client, seeded_tenant):
             "id": event_id,
             "source": f"urn:ascense:gateway:{gateway_id}/sensor/suricata-01",
             "type": "com.ascense.network.connection.observed.v1",
-            "time": datetime.now(timezone.utc).isoformat(),
+            "time": datetime.now(UTC).isoformat(),
             "tenantid": tenant_id,
             "gatewayid": gateway_id,
             "data": {
@@ -164,7 +166,7 @@ async def test_duplicate_event_is_deduplicated(app_client, seeded_tenant):
         "id": event_id,
         "source": f"urn:ascense:gateway:{gateway_id}/sensor/suricata-01",
         "type": "com.ascense.network.connection.observed.v1",
-        "time": datetime.now(timezone.utc).isoformat(),
+        "time": datetime.now(UTC).isoformat(),
         "tenantid": tenant_id,
         "gatewayid": gateway_id,
         "data": {
@@ -188,9 +190,10 @@ async def test_duplicate_event_is_deduplicated(app_client, seeded_tenant):
     assert resp2.json()["accepted_count"] == 1
 
     # Only one event should exist in the database
+    from sqlalchemy import func, select
+
     from ascense.db import async_session_factory
     from ascense.models import Event
-    from sqlalchemy import select, func
 
     async with async_session_factory() as session:
         result = await session.execute(
@@ -216,7 +219,7 @@ async def test_unsupported_event_type_rejected(app_client, seeded_tenant):
             "id": "bad-type-ev-001",
             "source": f"urn:ascense:gateway:{gateway_id}/sensor/suricata-01",
             "type": "com.unknown.malicious.event.v1",
-            "time": datetime.now(timezone.utc).isoformat(),
+            "time": datetime.now(UTC).isoformat(),
             "tenantid": tenant_id,
             "gatewayid": gateway_id,
             "data": {
@@ -244,10 +247,10 @@ async def test_unsupported_event_type_rejected(app_client, seeded_tenant):
 async def test_suspicious_event_produces_finding(seeded_tenant):
     """Stage 3B: suspicious event → detection finding created by detection worker."""
     from uuid import uuid7
+
     from ascense.db import async_session_factory
-    from ascense.models import DetectionFinding, Event, Gateway
+    from ascense.models import Event
     from ascense.workers.detection.worker import evaluate_event
-    from sqlalchemy import select
 
     tenant_id = UUID(seeded_tenant["tenant_id"])
     gateway_id = UUID(seeded_tenant["gateway_id"])
@@ -265,8 +268,8 @@ async def test_suspicious_event_produces_finding(seeded_tenant):
             sensor_name="suricata",
             sensor_instance_id="suricata-01",
             event_kind="network.connection",
-            observed_at=datetime.now(timezone.utc),
-            ingested_at=datetime.now(timezone.utc),
+            observed_at=datetime.now(UTC),
+            ingested_at=datetime.now(UTC),
             asset_resolution_status="UNRESOLVED",
             data={
                 "network": {
@@ -293,11 +296,13 @@ async def test_suspicious_event_produces_finding(seeded_tenant):
 async def test_detection_pipeline_finding_to_alert_to_incident(seeded_tenant):
     """Stage 3B: finding → alert → incident (correlation worker in-process)."""
     from uuid import uuid7
-    from ascense.db import async_session_factory
-    from ascense.models import Alert, DetectionFinding, Event, Gateway, Incident
-    from ascense.workers.detection.worker import evaluate_event
-    from ascense.workers.correlation.worker import _promote_finding, _get_or_create_incident
+
     from sqlalchemy import select
+
+    from ascense.db import async_session_factory
+    from ascense.models import Alert, Event, Incident
+    from ascense.workers.correlation.worker import _get_or_create_incident, _promote_finding
+    from ascense.workers.detection.worker import evaluate_event
 
     tenant_id = UUID(seeded_tenant["tenant_id"])
     gateway_id = UUID(seeded_tenant["gateway_id"])
@@ -314,8 +319,8 @@ async def test_detection_pipeline_finding_to_alert_to_incident(seeded_tenant):
             sensor_name="suricata",
             sensor_instance_id="suricata-01",
             event_kind="network.connection",
-            observed_at=datetime.now(timezone.utc),
-            ingested_at=datetime.now(timezone.utc),
+            observed_at=datetime.now(UTC),
+            ingested_at=datetime.now(UTC),
             asset_resolution_status="UNRESOLVED",
             data={"network": {
                 "source_ip": "192.0.2.10",

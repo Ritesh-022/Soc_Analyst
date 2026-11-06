@@ -14,13 +14,13 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ascense.db import get_session
 from ascense.api.dependencies.auth import get_current_user_id, get_tenant_id
+from ascense.db import get_session
 from ascense.models import Membership, Tenant, User
 
 router = APIRouter(tags=["Identity"])

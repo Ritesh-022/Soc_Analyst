@@ -17,8 +17,7 @@ All unit-testable cases run without a database.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-from uuid import UUID
+from datetime import UTC, datetime
 
 import pytest
 
@@ -85,11 +84,10 @@ class TestDetectionRuleIsolation:
     @pytest.mark.asyncio
     async def test_rules_are_evaluated_independently(self):
         """Each rule runs independently — one rule failing must not block others."""
-        from ascense.workers.detection.worker import RULES
-        from datetime import datetime, timezone
         from uuid import uuid7
 
         from ascense.models import Event
+        from ascense.workers.detection.worker import RULES
 
         # An event that triggers the known-bad IP rule
         event = Event(
@@ -102,8 +100,8 @@ class TestDetectionRuleIsolation:
             sensor_name="suricata",
             sensor_instance_id="suricata-01",
             event_kind="network.connection",
-            observed_at=datetime.now(timezone.utc),
-            ingested_at=datetime.now(timezone.utc),
+            observed_at=datetime.now(UTC),
+            ingested_at=datetime.now(UTC),
             asset_resolution_status="UNRESOLVED",
             data={"network": {
                 "source_ip": "192.0.2.10",
@@ -127,10 +125,10 @@ class TestDetectionRuleIsolation:
     @pytest.mark.asyncio
     async def test_benign_event_produces_no_findings(self):
         """A completely benign event must produce zero findings."""
-        from ascense.workers.detection.worker import RULES
-        from datetime import datetime, timezone
         from uuid import uuid7
+
         from ascense.models import Event
+        from ascense.workers.detection.worker import RULES
 
         event = Event(
             id=uuid7(),
@@ -142,8 +140,8 @@ class TestDetectionRuleIsolation:
             sensor_name="suricata",
             sensor_instance_id="suricata-01",
             event_kind="network.connection",
-            observed_at=datetime.now(timezone.utc),
-            ingested_at=datetime.now(timezone.utc),
+            observed_at=datetime.now(UTC),
+            ingested_at=datetime.now(UTC),
             asset_resolution_status="UNRESOLVED",
             data={"network": {
                 "source_ip": "10.0.0.5",
@@ -203,7 +201,7 @@ class TestPolicyEngineSecurity:
 
     def test_isolate_asset_requires_approval(self):
         """isolate_asset must always require human approval — never automated."""
-        from ascense.api.routes.policy import HUMAN_APPROVAL_REQUIRED_TYPES, AUTOMATED_ACTION_TYPES
+        from ascense.api.routes.policy import AUTOMATED_ACTION_TYPES, HUMAN_APPROVAL_REQUIRED_TYPES
         assert "isolate_asset" in HUMAN_APPROVAL_REQUIRED_TYPES
         assert "isolate_asset" not in AUTOMATED_ACTION_TYPES
 
@@ -255,10 +253,10 @@ class TestLeaseExpiry:
     def test_lease_expiry_worker_imports_correctly(self):
         """Smoke test — lease expiry worker imports without errors."""
         from ascense.workers.response.lease_expiry import (
-            run_lease_expiry_worker,
-            _expire_stale_leases,
-            _expire_dead_commands,
             _expire_approvals,
+            _expire_dead_commands,
+            _expire_stale_leases,
+            run_lease_expiry_worker,
         )
         assert callable(run_lease_expiry_worker)
         assert callable(_expire_stale_leases)

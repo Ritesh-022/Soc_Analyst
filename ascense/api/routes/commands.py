@@ -20,7 +20,7 @@ Public API:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -122,9 +122,11 @@ async def create_command(
         raise HTTPException(status_code=422, detail="No active policy version for tenant")
 
     try:
-        command = await create_signed_command(proposal, approval, policy_version_id, session)
+        command = await create_signed_command(
+            proposal, approval, policy_version_id, session
+        )
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return {
         "command_id": str(command.id),
@@ -188,7 +190,6 @@ async def claim_command(
     returns to QUEUED.
     """
     from datetime import timedelta
-    import secrets
 
     result = await session.execute(
         select(Gateway).where(Gateway.id == gateway_id)
@@ -214,14 +215,14 @@ async def claim_command(
         return {"command": None}
 
     # Check command has not expired
-    if command.expires_at < datetime.now(timezone.utc):
+    if command.expires_at < datetime.now(UTC):
         command.status = "EXPIRED"
         await session.commit()
         return {"command": None}
 
     # Issue the lease
     command.status = "LEASED"
-    command.lease_expires_at = datetime.now(timezone.utc) + timedelta(seconds=300)
+    command.lease_expires_at = datetime.now(UTC) + timedelta(seconds=300)
     await session.commit()
 
     return {
@@ -269,7 +270,7 @@ async def acknowledge_command(
             detail=f"Command is in status {command.status}, cannot acknowledge",
         )
 
-    if command.lease_expires_at and command.lease_expires_at < datetime.now(timezone.utc):
+    if command.lease_expires_at and command.lease_expires_at < datetime.now(UTC):
         command.status = "EXPIRED"
         await session.commit()
         raise HTTPException(status_code=409, detail="Command lease has expired")
@@ -336,12 +337,12 @@ async def report_execution_result(
             command_id=command.id,
             gateway_id=gateway_id,
             command_hash=cmd_hash,
-            received_at=datetime.now(timezone.utc),
-            execution_started_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
+            execution_started_at=datetime.now(UTC),
         )
         session.add(attempt)
 
-    attempt.execution_completed_at = datetime.now(timezone.utc)
+    attempt.execution_completed_at = datetime.now(UTC)
     attempt.execution_status = body.execution_status
     attempt.observed_enforcement_state = body.observed_enforcement_state
     attempt.result_reference = body.result_reference
@@ -420,8 +421,14 @@ async def list_executions(
                 "execution_status": a.execution_status,
                 "verification_status": a.verification_status,
                 "received_at": a.received_at.isoformat(),
-                "execution_started_at": a.execution_started_at.isoformat() if a.execution_started_at else None,
-                "execution_completed_at": a.execution_completed_at.isoformat() if a.execution_completed_at else None,
+                "execution_started_at": (
+                    a.execution_started_at.isoformat()
+                    if a.execution_started_at else None
+                ),
+                "execution_completed_at": (
+                    a.execution_completed_at.isoformat()
+                    if a.execution_completed_at else None
+                ),
                 "observed_enforcement_state": a.observed_enforcement_state,
                 "result_reference": a.result_reference,
             }

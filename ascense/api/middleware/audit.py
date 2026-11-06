@@ -12,7 +12,7 @@ retention period.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid7
 
 import structlog
@@ -61,7 +61,8 @@ class AuditMiddleware(BaseHTTPMiddleware):
 
         if audit_action:
             tenant_id = getattr(request.state, "tenant_id", None)
-            trace_id = request.headers.get("traceparent", "").split("-")[1] if "traceparent" in request.headers else None
+            traceparent = request.headers.get("traceparent", "")
+            trace_id = traceparent.split("-")[1] if traceparent else None
 
             logger.info(
                 "audit.event",
@@ -73,7 +74,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 status_code=response.status_code,
                 outcome="success" if response.status_code < 400 else "failure",
                 trace_id=trace_id,
-                occurred_at=datetime.now(timezone.utc).isoformat(),
+                occurred_at=datetime.now(UTC).isoformat(),
             )
 
         return response

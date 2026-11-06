@@ -17,13 +17,12 @@ or derived from the JWT's tenant claim in production.
 
 from __future__ import annotations
 
-import os
 from uuid import UUID
 
 import jwt as pyjwt
 import structlog
-from fastapi import HTTPException, Request, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import Request
+from fastapi.security import HTTPBearer
 
 from ascense.config import get_settings
 
@@ -41,13 +40,12 @@ def _decode_dev_token(token: str) -> dict | None:
     Payload: {"sub": "<user_id>", "tenant_id": "<tenant_id>"}
     """
     try:
-        payload = pyjwt.decode(
+        return pyjwt.decode(
             token,
             key=settings.DEV_AUTH_SECRET,
             algorithms=["HS256"],
             options={"require": ["sub"]},
         )
-        return payload
     except pyjwt.PyJWTError:
         return None
 

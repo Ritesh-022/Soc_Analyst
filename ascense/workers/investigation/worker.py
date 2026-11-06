@@ -23,8 +23,7 @@ Baseline C must be frozen before this worker is activated.
 from __future__ import annotations
 
 import asyncio
-import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import structlog
@@ -32,7 +31,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ascense.broker import QUEUE_INVESTIGATION, IdempotentConsumer
-from ascense.config import get_settings
 from ascense.db import async_session_factory
 from ascense.models import Alert, Event, Evidence, Incident
 
@@ -219,12 +217,11 @@ async def run_investigation(
     Returns a structured result matching investigation-result-v1.json.
     This is a stub — full LangGraph wiring is Stage 5 work.
     """
-    from ascense.models import Incident as IncidentModel
 
     context = await build_incident_context(incident, session)
 
     # Stub result — real implementation calls LangGraph agent
-    result = {
+    return {
         "investigation_id": str(investigation_id),
         "incident_id": str(incident.id),
         "tenant_id": str(incident.tenant_id),
@@ -244,9 +241,8 @@ async def run_investigation(
             "evidence_refs": [e["evidence_id"] for e in context["evidence"]],
         },
         "action_proposals": [],  # no proposals until agent is implemented
-        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "completed_at": datetime.now(UTC).isoformat(),
     }
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -311,7 +307,7 @@ class InvestigationConsumer(IdempotentConsumer):
                     investigation_id=str(investigation_id),
                     status=_result.get("status"),
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning(
                     "investigation.timeout",
                     investigation_id=str(investigation_id),

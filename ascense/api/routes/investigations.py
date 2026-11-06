@@ -19,7 +19,7 @@ Every investigation is:
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -64,8 +64,8 @@ async def start_investigation(
       - No direct command execution
     """
     from uuid import uuid7
+
     from ascense.workers.investigation.worker import (
-        build_incident_context,
         run_investigation,
     )
 
@@ -96,7 +96,7 @@ async def start_investigation(
         "incident_id": str(incident_id),
         "tenant_id": str(tenant_id),
         "status": "PENDING",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "completed_at": None,
         "result": None,
     }
@@ -108,7 +108,7 @@ async def start_investigation(
             inv_result = await run_investigation(incident, investigation_id, session)
             _investigations[inv_id_str].update({
                 "status": inv_result.get("status", "COMPLETED"),
-                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "completed_at": datetime.now(UTC).isoformat(),
                 "result": inv_result,
             })
         except asyncio.CancelledError:
@@ -173,6 +173,6 @@ async def cancel_investigation(
         )
 
     inv["status"] = "CANCELLED"
-    inv["completed_at"] = datetime.now(timezone.utc).isoformat()
+    inv["completed_at"] = datetime.now(UTC).isoformat()
 
     return {"investigation_id": inv_id_str, "status": "CANCELLED"}

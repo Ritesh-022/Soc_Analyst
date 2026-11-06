@@ -15,15 +15,15 @@ Telemetry health states:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ascense.db import get_session
 from ascense.api.dependencies.auth import get_tenant_id
+from ascense.db import get_session
 from ascense.models import Event, Gateway
 
 router = APIRouter(tags=["Telemetry"])
@@ -42,13 +42,16 @@ async def compute_gateway_health(
     When sensors stop reporting, the dashboard must show degraded status —
     not a clean environment implying no attacks.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     health = {
         "gateway_id": str(gateway.id),
         "gateway_name": gateway.name,
         "gateway_status": gateway.status,
         "overall_status": "UNKNOWN",
-        "last_heartbeat_at": gateway.last_heartbeat_at.isoformat() if gateway.last_heartbeat_at else None,
+        "last_heartbeat_at": (
+            gateway.last_heartbeat_at.isoformat()
+            if gateway.last_heartbeat_at else None
+        ),
         "last_event_at": None,
         "sensors": [],
     }
@@ -78,10 +81,12 @@ async def compute_gateway_health(
             if health["overall_status"] in ("UNKNOWN", "HEALTHY"):
                 health["overall_status"] = "TELEMETRY_STALE"
         else:
-            # Events are fresh
-            if health["overall_status"] in ("UNKNOWN", "DISCONNECTED"):
-                if health["overall_status"] == "UNKNOWN":
-                    health["overall_status"] = "HEALTHY"
+            # Events are fresh — only promote to HEALTHY if currently UNKNOWN
+            if (
+                health["overall_status"] in ("UNKNOWN", "DISCONNECTED")
+                and health["overall_status"] == "UNKNOWN"
+            ):
+                health["overall_status"] = "HEALTHY"
 
     return health
 
@@ -130,7 +135,7 @@ async def list_gateway_sensors(
         last_event_at = result.scalar_one_or_none()
 
         # Determine sensor status
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if last_event_at:
             age = (now - last_event_at).total_seconds()
             if age > EVENT_STALE_SECONDS:
@@ -175,5 +180,4 @@ async def get_telemetry_health(
     if gateway.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="Tenant access denied")
 
-    health = await compute_gateway_health(gateway, session)
-    return health
+    return await compute_gateway_health(gateway, session)

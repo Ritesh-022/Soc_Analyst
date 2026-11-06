@@ -17,14 +17,16 @@ from __future__ import annotations
 
 from uuid import UUID
 
+import structlog
 from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ascense.config import get_settings
 from ascense.db import get_session
-from ascense.models import Membership, User
+from ascense.models import Membership
 
+logger = structlog.get_logger(__name__)
 _settings = get_settings()
 _IS_DEV = _settings.ENVIRONMENT == "development"
 
@@ -46,17 +48,17 @@ async def get_current_user_id(
         try:
             return UUID(state_user_id)
         except ValueError:
-            pass
+            pass  # fall through to other auth methods
 
     # Dev bypass: X-User-ID header
     if _IS_DEV and x_user_id:
         try:
             return UUID(x_user_id)
-        except ValueError:
+        except ValueError as exc:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid user ID format in X-User-ID header",
-            )
+            ) from exc
 
     # Try Bearer token via auth middleware
     try:
@@ -64,12 +66,15 @@ async def get_current_user_id(
         user_id = await resolve_user_from_token(request)
         if user_id:
             return user_id
-    except Exception:
-        pass
+    except Exception:  # noqa: BLE001 — auth middleware failure is non-fatal
+        logger.debug("auth.bearer_token_resolution_failed")
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Authentication required. Provide a Bearer token or X-User-ID header (dev only).",
+        detail=(
+            "Authentication required. "
+            "Provide a Bearer token or X-User-ID header (dev only)."
+        ),
     )
 
 
@@ -84,15 +89,18 @@ async def get_tenant_id(request: Request) -> UUID:
     if not tenant_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Tenant context required. Provide X-Tenant-ID header (dev) or a tenant-scoped JWT.",
+            detail=(
+                "Tenant context required. "
+                "Provide X-Tenant-ID header (dev) or a tenant-scoped JWT."
+            ),
         )
     try:
         return UUID(tenant_id)
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as exc:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid tenant context",
-        )
+        ) from exc
 
 
 async def verify_tenant_membership(

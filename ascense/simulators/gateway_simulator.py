@@ -23,11 +23,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import random
 import secrets
-import string
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import httpx
@@ -83,7 +81,7 @@ def generate_event(gateway_id: UUID) -> dict:
         "id": event_id,
         "source": source_urn,
         "type": "com.ascense.network.connection.observed.v1",
-        "time": datetime.now(timezone.utc).isoformat(),
+        "time": datetime.now(UTC).isoformat(),
         "datacontenttype": "application/json",
         "data": {
             "schema_version": "1.0",
@@ -115,7 +113,7 @@ def generate_heartbeat(gateway_id: UUID) -> dict:
     """Generate a heartbeat payload with sensor health status."""
     return {
         "gateway_id": str(gateway_id),
-        "sent_at": datetime.now(timezone.utc).isoformat(),
+        "sent_at": datetime.now(UTC).isoformat(),
         "config_version": 0,
         "sensors": [
             {
@@ -123,7 +121,7 @@ def generate_heartbeat(gateway_id: UUID) -> dict:
                 "instance_id": SENSOR_INSTANCE_ID,
                 "version": SENSOR_VERSION,
                 "status": "HEALTHY",
-                "last_event_at": datetime.now(timezone.utc).isoformat(),
+                "last_event_at": datetime.now(UTC).isoformat(),
             },
         ],
     }
@@ -240,12 +238,14 @@ def main() -> None:
     parser.add_argument("--tenant-id", required=True, help="Tenant UUID")
     parser.add_argument("--gateway-id", required=True, help="Gateway UUID")
     parser.add_argument("--rate", type=float, default=5, help="Events per second")
-    parser.add_argument("--duration", type=int, default=None, help="Duration in seconds (default: forever)")
+    parser.add_argument(
+        "--duration", type=int, default=None,
+        help="Duration in seconds (default: forever)",
+    )
     parser.add_argument("--log-level", default="INFO", help="Log level")
 
     args = parser.parse_args()
 
-    import logging
     structlog.configure(
         processors=[
             structlog.stdlib.add_log_level,

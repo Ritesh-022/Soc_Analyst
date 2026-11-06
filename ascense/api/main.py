@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import structlog
 from fastapi import FastAPI
@@ -46,7 +46,7 @@ async def _telemetry_stale_job() -> None:
     logger.info("telemetry_stale_job.starting")
     while True:
         try:
-            cutoff = datetime.now(timezone.utc) - timedelta(seconds=TELEMETRY_STALE_THRESHOLD)
+            cutoff = datetime.now(UTC) - timedelta(seconds=TELEMETRY_STALE_THRESHOLD)
             async with async_session_factory() as session:
                 result = await session.execute(
                     select(Gateway).where(
@@ -77,11 +77,11 @@ async def lifespan(app: FastAPI):
     worker_tasks: list[asyncio.Task] = []
     run_workers = os.getenv("ASCENSE_RUN_WORKERS", "true").lower() == "true"
     if run_workers:
-        from ascense.workers.detection.worker import run_worker as run_detection
         from ascense.workers.correlation.worker import run_worker as run_correlation
+        from ascense.workers.detection.worker import run_worker as run_detection
         from ascense.workers.ingestion.worker import run_normalization_worker
-        from ascense.workers.response.lease_expiry import run_lease_expiry_worker
         from ascense.workers.investigation.worker import run_worker as run_investigation
+        from ascense.workers.response.lease_expiry import run_lease_expiry_worker
         worker_tasks.append(asyncio.create_task(run_detection()))
         worker_tasks.append(asyncio.create_task(run_correlation()))
         worker_tasks.append(asyncio.create_task(run_normalization_worker()))

@@ -11,7 +11,8 @@ GET  /api/v1/audit-events
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+import contextlib
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid7
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -111,7 +112,7 @@ async def create_proposal(
         created_by="user",
         created_by_user_id=user_id,
         status="PENDING_APPROVAL",
-        expires_at=datetime.now(timezone.utc) + timedelta(seconds=PROPOSAL_EXPIRY_SECONDS),
+        expires_at=datetime.now(UTC) + timedelta(seconds=PROPOSAL_EXPIRY_SECONDS),
     )
     session.add(proposal)
     await session.commit()
@@ -179,7 +180,10 @@ async def get_proposal(
         "reason": proposal.reason,
         "status": proposal.status,
         "created_by": proposal.created_by,
-        "created_by_user_id": str(proposal.created_by_user_id) if proposal.created_by_user_id else None,
+        "created_by_user_id": (
+            str(proposal.created_by_user_id)
+            if proposal.created_by_user_id else None
+        ),
         "evidence_ids": proposal.evidence_ids,
         "affected_asset_ids": proposal.affected_asset_ids,
         "expires_at": proposal.expires_at.isoformat() if proposal.expires_at else None,
@@ -220,7 +224,7 @@ async def record_approval(
         raise HTTPException(status_code=403, detail="Cannot approve your own proposal")
 
     # Proposal must not be expired
-    if proposal.expires_at and proposal.expires_at < datetime.now(timezone.utc):
+    if proposal.expires_at and proposal.expires_at < datetime.now(UTC):
         raise HTTPException(status_code=422, detail="Proposal has expired")
 
     if body.decision not in ("APPROVED", "REJECTED"):
@@ -234,12 +238,12 @@ async def record_approval(
         reason=body.reason,
         approver_id=user_id,
         status="RECORDED",
-        expires_at=datetime.now(timezone.utc) + timedelta(seconds=PROPOSAL_EXPIRY_SECONDS),
+        expires_at=datetime.now(UTC) + timedelta(seconds=PROPOSAL_EXPIRY_SECONDS),
     )
     session.add(approval)
 
     proposal.status = "APPROVED" if body.decision == "APPROVED" else "REJECTED"
-    proposal.updated_at = datetime.now(timezone.utc)
+    proposal.updated_at = datetime.now(UTC)
     await session.commit()
 
     if body.decision == "APPROVED":
@@ -340,10 +344,8 @@ async def list_audit_events(
 
     query = select(AuditEvent).where(AuditEvent.tenant_id == tenant_id)
     if cursor:
-        try:
+        with contextlib.suppress(ValueError):
             query = query.where(AuditEvent.id < UUID(cursor))
-        except ValueError:
-            pass
     query = query.order_by(AuditEvent.occurred_at.desc()).limit(limit + 1)
 
     result = await session.execute(query)
@@ -467,7 +469,7 @@ async def cancel_proposal(
         )
 
     proposal.status = "CANCELLED"
-    proposal.updated_at = datetime.now(timezone.utc)
+    proposal.updated_at = datetime.now(UTC)
     await session.commit()
 
     return {"proposal_id": str(proposal.id), "status": proposal.status}

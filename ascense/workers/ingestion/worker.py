@@ -17,18 +17,14 @@ handled safely — the detection worker checks for existing findings per
 from __future__ import annotations
 
 import asyncio
-import json
-from datetime import datetime, timezone
 from uuid import UUID
 
-import aio_pika
 import structlog
 from sqlalchemy import select
 
 from ascense.broker import (
-    IdempotentConsumer,
     QUEUE_NORMALIZATION,
-    get_channel,
+    IdempotentConsumer,
     publish,
 )
 from ascense.db import async_session_factory
@@ -66,8 +62,13 @@ async def normalize_event(event_id: UUID) -> dict | None:
             "observed_at": event.observed_at.isoformat(),
             "ingested_at": event.ingested_at.isoformat(),
             "asset_resolution_status": event.asset_resolution_status,
-            "source_asset_id": str(event.source_asset_id) if event.source_asset_id else None,
-            "destination_asset_id": str(event.destination_asset_id) if event.destination_asset_id else None,
+            "source_asset_id": (
+                str(event.source_asset_id) if event.source_asset_id else None
+            ),
+            "destination_asset_id": (
+                str(event.destination_asset_id)
+                if event.destination_asset_id else None
+            ),
             "data": event.data,
         }
 

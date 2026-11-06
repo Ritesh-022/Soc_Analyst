@@ -17,8 +17,7 @@ Environment: set DATABASE_URL to point at a test database, or run
 
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
@@ -53,11 +52,12 @@ def anyio_backend():
 async def app_client():
     """Provide an httpx.AsyncClient wrapping the FastAPI app in-process."""
     try:
-        import httpx
-        from ascense.api.main import create_app
-
         # Create the app without starting broker (unit-test mode)
         import os
+
+        import httpx
+
+        from ascense.api.main import create_app
         os.environ.setdefault("ASCENSE_RUN_WORKERS", "false")
         application = create_app()
 
@@ -74,6 +74,7 @@ async def app_client():
 async def two_tenants(app_client):
     """Create two isolated tenants with users and return their IDs."""
     from uuid import uuid7
+
     from ascense.db import async_session_factory
     from ascense.models import Membership, Tenant, User
 
@@ -84,14 +85,24 @@ async def two_tenants(app_client):
             user_a_id = uuid7()
             session.add(Tenant(id=tenant_a_id, name="Test Tenant A"))
             session.add(User(id=user_a_id, display_name="User A", email="a@test.example"))
-            session.add(Membership(id=uuid7(), user_id=user_a_id, tenant_id=tenant_a_id, role="admin"))
+            session.add(
+                Membership(
+                    id=uuid7(), user_id=user_a_id,
+                    tenant_id=tenant_a_id, role="admin",
+                )
+            )
 
             # Tenant B
             tenant_b_id = uuid7()
             user_b_id = uuid7()
             session.add(Tenant(id=tenant_b_id, name="Test Tenant B"))
             session.add(User(id=user_b_id, display_name="User B", email="b@test.example"))
-            session.add(Membership(id=uuid7(), user_id=user_b_id, tenant_id=tenant_b_id, role="admin"))
+            session.add(
+                Membership(
+                    id=uuid7(), user_id=user_b_id,
+                    tenant_id=tenant_b_id, role="admin",
+                )
+            )
 
             await session.commit()
 
@@ -114,6 +125,7 @@ async def test_user_cannot_see_other_tenant_gateways(app_client, two_tenants):
     """User A listing gateways must not see Tenant B's gateways."""
     # Create a gateway for Tenant B
     from uuid import uuid7
+
     from ascense.db import async_session_factory
     from ascense.models import Gateway
 
@@ -141,6 +153,7 @@ async def test_user_cannot_see_other_tenant_gateways(app_client, two_tenants):
 async def test_direct_access_to_other_tenant_gateway_returns_403(app_client, two_tenants):
     """Accessing another tenant's gateway directly returns 403, not 404."""
     from uuid import uuid7
+
     from ascense.db import async_session_factory
     from ascense.models import Gateway
 
@@ -165,8 +178,9 @@ async def test_direct_access_to_other_tenant_gateway_returns_403(app_client, two
 @pytest.mark.asyncio
 async def test_direct_access_to_other_tenant_event_returns_403(app_client, two_tenants):
     """Accessing another tenant's event directly returns 403."""
+    from datetime import datetime
     from uuid import uuid7
-    from datetime import datetime, timezone
+
     from ascense.db import async_session_factory
     from ascense.models import Event, Gateway
 
@@ -189,10 +203,16 @@ async def test_direct_access_to_other_tenant_event_returns_403(app_client, two_t
             sensor_name="suricata",
             sensor_instance_id="suricata-01",
             event_kind="network.connection",
-            observed_at=datetime.now(timezone.utc),
-            ingested_at=datetime.now(timezone.utc),
+            observed_at=datetime.now(UTC),
+            ingested_at=datetime.now(UTC),
             asset_resolution_status="UNRESOLVED",
-            data={"network": {"source_ip": "10.0.0.1", "destination_ip": "10.0.0.2", "transport": "tcp"}},
+            data={
+                "network": {
+                    "source_ip": "10.0.0.1",
+                    "destination_ip": "10.0.0.2",
+                    "transport": "tcp",
+                }
+            },
         ))
         await session.commit()
 
@@ -207,6 +227,7 @@ async def test_direct_access_to_other_tenant_event_returns_403(app_client, two_t
 async def test_direct_access_to_other_tenant_alert_returns_403(app_client, two_tenants):
     """Accessing another tenant's alert directly returns 403."""
     from uuid import uuid7
+
     from ascense.db import async_session_factory
     from ascense.models import Alert
 
@@ -219,7 +240,7 @@ async def test_direct_access_to_other_tenant_alert_returns_403(app_client, two_t
             severity="low",
             risk_score=10,
             status="NEW",
-            observed_at=datetime.now(timezone.utc),
+            observed_at=datetime.now(UTC),
             detection_finding_ids=[],
             event_ids=[],
             evidence_ids=[],
@@ -246,6 +267,7 @@ async def test_unauthenticated_request_returns_401(app_client):
 async def test_list_endpoints_are_tenant_scoped(app_client, two_tenants):
     """List endpoints must only return items belonging to the requesting tenant."""
     from uuid import uuid7
+
     from ascense.db import async_session_factory
     from ascense.models import Incident
 
@@ -293,9 +315,10 @@ async def test_payload_tenant_id_ignored_uses_auth_context(app_client, two_tenan
     assert "token" in data
 
     # The created gateway must belong to Tenant A, not B
+    from sqlalchemy import select
+
     from ascense.db import async_session_factory
     from ascense.models import Gateway
-    from sqlalchemy import select
 
     async with async_session_factory() as session:
         result = await session.execute(

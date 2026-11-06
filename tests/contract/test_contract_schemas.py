@@ -12,7 +12,6 @@ A failing contract test blocks the PR.
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import jsonschema
@@ -140,7 +139,11 @@ class TestNetworkConnectionSchema:
             "source_event_id": "zeek-conn-001",
             "event_kind": "network.connection",
             "sensor": {"name": "zeek", "instance_id": "zeek-01", "version": "7.x"},
-            "asset_resolution": {"status": "UNRESOLVED", "source_asset_id": None, "destination_asset_id": None},
+            "asset_resolution": {
+                "status": "UNRESOLVED",
+                "source_asset_id": None,
+                "destination_asset_id": None,
+            },
             "network": {
                 "source_ip": "192.0.2.10",
                 "source_port": 51432,
@@ -173,7 +176,11 @@ class TestNetworkConnectionSchema:
             "source_event_id": "ev-001",
             "event_kind": "network.connection",
             "sensor": {"name": "suricata", "instance_id": "suricata-01"},
-            "asset_resolution": {"status": "UNRESOLVED", "source_asset_id": None, "destination_asset_id": None},
+            "asset_resolution": {
+                "status": "UNRESOLVED",
+                "source_asset_id": None,
+                "destination_asset_id": None,
+            },
             "network": {"source_ip": "10.0.0.1", "destination_ip": "8.8.8.8", "transport": "tcp"},
         }
         jsonschema.validate(valid, schema)
@@ -324,7 +331,10 @@ class TestOpenAPISpecs:
                     if not isinstance(method_info, dict):
                         continue
                     for resp_info in method_info.get("responses", {}).values():
-                        content = resp_info.get("content", {}) if isinstance(resp_info, dict) else {}
+                        content = (
+                            resp_info.get("content", {})
+                            if isinstance(resp_info, dict) else {}
+                        )
                         if "application/problem+json" in content:
                             found_problem_json = True
                             break

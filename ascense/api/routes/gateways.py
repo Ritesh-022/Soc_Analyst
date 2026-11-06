@@ -13,7 +13,8 @@ Edge API:
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+import contextlib
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid7
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -21,8 +22,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ascense.db import get_session
 from ascense.api.dependencies.auth import get_tenant_id, require_role
+from ascense.db import get_session
 from ascense.models import EnrollmentToken, Gateway
 
 router = APIRouter(tags=["Gateways"])
@@ -96,10 +97,8 @@ async def list_gateways(
 
     query = select(Gateway).where(Gateway.tenant_id == tenant_id)
     if cursor:
-        try:
+        with contextlib.suppress(ValueError):
             query = query.where(Gateway.id < UUID(cursor))
-        except ValueError:
-            pass
 
     query = query.order_by(Gateway.id.desc()).limit(limit + 1)
     result = await session.execute(query)
@@ -117,7 +116,10 @@ async def list_gateways(
                 "name": g.name,
                 "status": g.status,
                 "registered_at": g.enrolled_at.isoformat() if g.enrolled_at else None,
-                "last_heartbeat_at": g.last_heartbeat_at.isoformat() if g.last_heartbeat_at else None,
+                "last_heartbeat_at": (
+                    g.last_heartbeat_at.isoformat()
+                    if g.last_heartbeat_at else None
+                ),
                 "config_version": g.config_version,
             }
             for g in items
@@ -151,7 +153,10 @@ async def get_gateway(
         "name": gateway.name,
         "status": gateway.status,
         "registered_at": gateway.enrolled_at.isoformat() if gateway.enrolled_at else None,
-        "last_heartbeat_at": gateway.last_heartbeat_at.isoformat() if gateway.last_heartbeat_at else None,
+        "last_heartbeat_at": (
+            gateway.last_heartbeat_at.isoformat()
+            if gateway.last_heartbeat_at else None
+        ),
         "config_version": gateway.config_version,
     }
 
@@ -185,7 +190,7 @@ async def create_enrollment_token(
         tenant_id=tenant_id,
         gateway_id=gateway_id,
         token=token_value,
-        expires_at=datetime.now(timezone.utc) + timedelta(seconds=body.expires_in_seconds),
+        expires_at=datetime.now(UTC) + timedelta(seconds=body.expires_in_seconds),
     )
     session.add(token)
     await session.commit()
@@ -219,7 +224,7 @@ async def gateway_heartbeat(
     if not gateway:
         raise HTTPException(status_code=404, detail="Gateway not found")
 
-    gateway.last_heartbeat_at = datetime.now(timezone.utc)
+    gateway.last_heartbeat_at = datetime.now(UTC)
     gateway.sensor_status = [
         {
             "name": s.name,
@@ -286,7 +291,7 @@ async def enroll_gateway(
     if token.used_at is not None:
         raise HTTPException(status_code=409, detail="Enrollment token already used")
 
-    if token.expires_at < datetime.now(timezone.utc):
+    if token.expires_at < datetime.now(UTC):
         raise HTTPException(status_code=410, detail="Enrollment token has expired")
 
     # Validate the gateway ID matches the token
@@ -303,11 +308,15 @@ async def enroll_gateway(
         raise HTTPException(status_code=404, detail="Gateway not found")
 
     if gateway.status != "ENROLLMENT_PENDING":
-        raise HTTPException(status_code=409, detail=f"Gateway is in status {gateway.status}, cannot enroll")
+        raise HTTPException(
+            status_code=409,
+            detail=f"Gateway is in status {gateway.status}, cannot enroll",
+        )
 
     # Generate a self-signed certificate for the gateway
     # In production, this would sign a CSR with the platform CA
     import hashlib
+
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import rsa
@@ -327,8 +336,8 @@ async def enroll_gateway(
         .issuer_name(issuer)
         .public_key(private_key.public_key())
         .serial_number(x509.random_serial_number())
-        .not_valid_before(datetime.now(timezone.utc))
-        .not_valid_after(datetime.now(timezone.utc) + timedelta(days=365))
+        .not_valid_before(datetime.now(UTC))
+        .not_valid_after(datetime.now(UTC) + timedelta(days=365))
         .add_extension(
             x509.SubjectAlternativeName([x509.DNSName(common_name)]),
             critical=False,
@@ -346,21 +355,21 @@ async def enroll_gateway(
         tenant_id=gateway.tenant_id,
         fingerprint=fingerprint,
         certificate_pem=cert_pem,
-        issued_at=datetime.now(timezone.utc),
-        expires_at=datetime.now(timezone.utc) + timedelta(days=365),
+        issued_at=datetime.now(UTC),
+        expires_at=datetime.now(UTC) + timedelta(days=365),
         status="ACTIVE",
     )
     session.add(gateway_cert)
 
     # Update gateway state
     gateway.status = "ACTIVE"
-    gateway.enrolled_at = datetime.now(timezone.utc)
+    gateway.enrolled_at = datetime.now(UTC)
     gateway.certificate_fingerprint = fingerprint
-    gateway.certificate_issued_at = datetime.now(timezone.utc)
-    gateway.certificate_expires_at = datetime.now(timezone.utc) + timedelta(days=365)
+    gateway.certificate_issued_at = datetime.now(UTC)
+    gateway.certificate_expires_at = datetime.now(UTC) + timedelta(days=365)
 
     # Mark token as used
-    token.used_at = datetime.now(timezone.utc)
+    token.used_at = datetime.now(UTC)
 
     await session.commit()
 
@@ -398,7 +407,7 @@ async def get_gateway_configuration(
         raise HTTPException(status_code=404, detail="Gateway not found")
 
     # Basic gateway configuration
-    config = {
+    return {
         "gateway_id": str(gateway.id),
         "config_version": gateway.config_version,
         "sensors": [
@@ -420,4 +429,3 @@ async def get_gateway_configuration(
         "event_batch_timeout_ms": 5000,
     }
 
-    return config

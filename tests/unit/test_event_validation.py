@@ -7,11 +7,6 @@ These tests use mocked database sessions.
 
 from __future__ import annotations
 
-import re
-from datetime import datetime, timezone
-
-import pytest
-
 from ascense.api.routes.events import (
     ALLOWED_EVENT_TYPES,
     ALLOWED_SENSOR_NAMES,

@@ -7,17 +7,16 @@ RabbitMQ — they test the rule logic in isolation.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid7
 
 import pytest
 
+from ascense.models import Event
 from ascense.workers.detection.worker import (
     RULES,
     SuspiciousOutboundConnectionRule,
-    evaluate_event,
 )
-from ascense.models import Event
 
 
 def _make_event(dest_ip: str = "10.0.0.1") -> Event:
@@ -32,8 +31,8 @@ def _make_event(dest_ip: str = "10.0.0.1") -> Event:
         sensor_name="suricata",
         sensor_instance_id="suricata-01",
         event_kind="network.connection",
-        observed_at=datetime.now(timezone.utc),
-        ingested_at=datetime.now(timezone.utc),
+        observed_at=datetime.now(UTC),
+        ingested_at=datetime.now(UTC),
         asset_resolution_status="UNRESOLVED",
         data={
             "network": {

@@ -14,6 +14,7 @@ Each transition records the actor, timestamp, and reason.
 
 from __future__ import annotations
 
+import contextlib
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -21,8 +22,8 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ascense.db import get_session
 from ascense.api.dependencies.auth import get_tenant_id
+from ascense.db import get_session
 from ascense.models import Incident
 
 router = APIRouter(tags=["Incidents"])
@@ -64,10 +65,8 @@ async def list_incidents(
     if severity:
         query = query.where(Incident.severity == severity)
     if cursor:
-        try:
+        with contextlib.suppress(ValueError):
             query = query.where(Incident.id < UUID(cursor))
-        except ValueError:
-            pass
 
     query = query.order_by(Incident.id.desc()).limit(limit + 1)
     result = await session.execute(query)

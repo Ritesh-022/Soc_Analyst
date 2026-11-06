@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import aio_pika
@@ -70,12 +70,12 @@ QUEUE_BINDINGS: dict[str, list[str]] = {
 # Connection pool (module-level singleton)
 # ---------------------------------------------------------------------------
 
-_connection: "Connection | None" = None
-_channel: "Channel | None" = None
-_exchange: "Exchange | None" = None
+_connection: Connection | None = None
+_channel: Channel | None = None
+_exchange: Exchange | None = None
 
 
-async def get_connection() -> "Connection":
+async def get_connection() -> Connection:
     global _connection
     if _connection is None or _connection.is_closed:
         settings = get_settings()
@@ -84,7 +84,7 @@ async def get_connection() -> "Connection":
     return _connection
 
 
-async def get_channel() -> "Channel":
+async def get_channel() -> Channel:
     global _channel
     conn = await get_connection()
     if _channel is None or _channel.is_closed:
@@ -93,7 +93,7 @@ async def get_channel() -> "Channel":
     return _channel
 
 
-async def get_exchange() -> "Exchange":
+async def get_exchange() -> Exchange:
     global _exchange
     if _exchange is None:
         channel = await get_channel()
@@ -181,12 +181,12 @@ MAX_RETRIES = 5
 BASE_RETRY_DELAY = 1  # seconds
 
 
-async def publish_pending_outbox(session: "AsyncSession") -> int:
+async def publish_pending_outbox(session: AsyncSession) -> int:
     """Read pending outbox records and publish to RabbitMQ.
 
     Returns the number of records successfully published.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     result = await session.execute(
         select(Outbox)
         .where(
@@ -207,7 +207,7 @@ async def publish_pending_outbox(session: "AsyncSession") -> int:
         try:
             await publish(record.message_type, record.payload)
             record.published = True
-            record.published_at = datetime.now(timezone.utc)
+            record.published_at = datetime.now(UTC)
             published += 1
             logger.info(
                 "outbox.published",
@@ -217,7 +217,7 @@ async def publish_pending_outbox(session: "AsyncSession") -> int:
         except Exception as exc:
             record.retry_count += 1
             delay = BASE_RETRY_DELAY * (2**record.retry_count)
-            record.next_retry_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
+            record.next_retry_at = datetime.now(UTC) + timedelta(seconds=delay)
             logger.error(
                 "outbox.publish_failed",
                 outbox_id=str(record.id),

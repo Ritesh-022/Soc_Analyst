@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID, uuid7
 
 import aio_pika
@@ -55,7 +55,7 @@ async def _get_or_create_incident(
     or create a new one."""
     from datetime import timedelta
 
-    window_start = datetime.now(timezone.utc) - timedelta(seconds=CORRELATION_WINDOW)
+    window_start = datetime.now(UTC) - timedelta(seconds=CORRELATION_WINDOW)
     result = await session.execute(
         select(Incident).where(
             Incident.tenant_id == tenant_id,
@@ -67,7 +67,7 @@ async def _get_or_create_incident(
 
     if incident:
         incident.alert_ids = incident.alert_ids + [str(alert.id)]
-        incident.updated_at = datetime.now(timezone.utc)
+        incident.updated_at = datetime.now(UTC)
     else:
         incident = Incident(
             id=uuid7(),
@@ -119,8 +119,14 @@ async def _handle_message(message: aio_pika.IncomingMessage) -> None:
                     incident_id=str(incident.id),
                 )
 
-                await publish("alert.created.v1", {"alert_id": str(alert.id), "tenant_id": str(tenant_id)})
-                await publish("incident.updated.v1", {"incident_id": str(incident.id), "tenant_id": str(tenant_id)})
+                await publish(
+                    "alert.created.v1",
+                    {"alert_id": str(alert.id), "tenant_id": str(tenant_id)},
+                )
+                await publish(
+                    "incident.updated.v1",
+                    {"incident_id": str(incident.id), "tenant_id": str(tenant_id)},
+                )
 
         except Exception:
             logger.exception("correlation.message_error")

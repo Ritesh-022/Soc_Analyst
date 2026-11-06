@@ -19,6 +19,7 @@ The unit-testable cases cover:
 from __future__ import annotations
 
 import hashlib
+
 import pytest
 
 pytestmark = pytest.mark.security
@@ -97,7 +98,6 @@ class TestCommandIdempotency:
 
     def test_command_has_idempotency_key_field(self):
         """Command schema requires idempotency_key — replay detection uses this."""
-        import inspect
         from ascense.models import Command
         columns = {c.key for c in Command.__table__.columns}
         assert "idempotency_key" in columns
@@ -126,6 +126,7 @@ class TestAtomicLeaseClaim:
     def test_claim_uses_select_for_update_skip_locked(self):
         """Verify the claim query uses atomic locking — inspect source."""
         import inspect
+
         from ascense.api.routes.commands import claim_command
         source = inspect.getsource(claim_command)
         assert "with_for_update" in source
@@ -141,6 +142,7 @@ class TestApprovalRevocationCancelsCommands:
     def test_revoke_approval_cancels_queued_commands(self):
         """Verify the revocation handler cancels QUEUED/LEASED commands."""
         import inspect
+
         from ascense.api.routes.proposals import revoke_approval
         source = inspect.getsource(revoke_approval)
         assert "CANCELLED" in source
@@ -190,9 +192,9 @@ class TestInvestigationReadOnlyTools:
 
     def test_investigation_read_tools_exist(self):
         from ascense.workers.investigation.worker import (
-            tool_search_events,
-            tool_search_alerts,
             tool_get_evidence,
+            tool_search_alerts,
+            tool_search_events,
         )
         assert callable(tool_search_events)
         assert callable(tool_search_alerts)
@@ -201,6 +203,7 @@ class TestInvestigationReadOnlyTools:
     def test_tool_get_evidence_enforces_tenant_id(self):
         """tool_get_evidence must filter by tenant_id — inspect source."""
         import inspect
+
         from ascense.workers.investigation.worker import tool_get_evidence
         src = inspect.getsource(tool_get_evidence)
         assert "tenant_id" in src, "Evidence tool must filter by tenant_id"
@@ -217,7 +220,8 @@ class TestDispatchedIsAuditOnly:
         # The contract test covers this via enums.yaml.
         # Here we verify the route-level logic also never sets DISPATCHED.
         import inspect
-        from ascense.api.routes.commands import claim_command, acknowledge_command
+
+        from ascense.api.routes.commands import acknowledge_command, claim_command
         for fn in (claim_command, acknowledge_command):
             src = inspect.getsource(fn)
             assert '"DISPATCHED"' not in src
@@ -232,8 +236,9 @@ class TestInternalEndpointIsolation:
 
     def test_internal_routes_use_internal_prefix(self):
         """All internal endpoints must use /internal/v1/ prefix."""
-        from ascense.api.routes import commands, policy
         import inspect
+
+        from ascense.api.routes import commands, policy
 
         for route_module in (commands, policy):
             src = inspect.getsource(route_module)
@@ -263,6 +268,7 @@ class TestVerificationStatusOwnership:
         """Gateway results endpoint sets execution_status only.
         verification_status must only be set by /internal/v1/commands/{id}/verify."""
         import inspect
+
         from ascense.api.routes.commands import report_execution_result
         src = inspect.getsource(report_execution_result)
         # The route sets execution_status from the body
@@ -274,6 +280,7 @@ class TestVerificationStatusOwnership:
     def test_trigger_verification_sets_verification_status(self):
         """Only trigger_verification is allowed to change verification_status."""
         import inspect
+
         from ascense.api.routes.commands import trigger_verification
         src = inspect.getsource(trigger_verification)
         assert "verification_status" in src
@@ -288,6 +295,7 @@ class TestUnknownStatusEscalation:
     def test_execution_result_logs_warning_on_unknown(self):
         """When execution_status is UNKNOWN, a warning must be logged for escalation."""
         import inspect
+
         from ascense.api.routes.commands import report_execution_result
         src = inspect.getsource(report_execution_result)
         assert "UNKNOWN" in src
@@ -295,7 +303,6 @@ class TestUnknownStatusEscalation:
 
     def test_unknown_not_in_verification_status(self):
         """UNKNOWN must not appear in verification_status enum (it was renamed to UNVERIFIABLE)."""
-        from ascense.api.routes.commands import ExecutionResultRequest
         # verification_status valid values
         valid_verification = {"PENDING", "VERIFIED", "NOT_VERIFIED", "UNVERIFIABLE"}
         assert "UNKNOWN" not in valid_verification
@@ -312,14 +319,16 @@ class TestAlertLifecycle:
         # From contracts/common/enums.yaml alert_status
         required = {"NEW", "ACKNOWLEDGED", "UNDER_INVESTIGATION", "RESOLVED", "FALSE_POSITIVE"}
         # These map to the STATUS_COLORS in AlertsPage.tsx and the route logic
-        from ascense.api.routes.alerts import router
         import inspect
-        src = inspect.getsource(router.__class__)  # smoke — module loads
+
+        from ascense.api.routes.alerts import router
+        inspect.getsource(router.__class__)  # smoke — module loads
         assert required  # all five states defined
 
     def test_new_alerts_have_correct_default_status(self):
         """Alerts created by correlation worker default to NEW."""
         import inspect
+
         from ascense.workers.correlation.worker import _promote_finding
         src = inspect.getsource(_promote_finding)
         assert '"NEW"' in src or "'NEW'" in src

@@ -46,6 +46,15 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM", "RET", "S"]
+# B008: FastAPI explicitly documents Depends() in signatures as the intended pattern.
+#       Suppressing this false positive is correct — it's not a bug.
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+# S101: assert is the standard assertion mechanism in pytest — expected in tests.
+# S311: random is intentional in the simulator for generating test traffic data.
+"tests/**" = ["S101"]
+"ascense/simulators/**" = ["S311"]
 
 [tool.mypy]
 python_version = "3.12"

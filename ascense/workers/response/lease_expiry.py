@@ -13,7 +13,7 @@ and marks them EXPIRED (unrecoverable).
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import structlog
 from sqlalchemy import select
@@ -34,7 +34,7 @@ async def _expire_stale_leases() -> int:
     The command retains the same command_id — gateways can re-claim it.
     The lease_expires_at is cleared so the next claim sets a fresh window.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     count = 0
     async with async_session_factory() as session:
         result = await session.execute(
@@ -66,7 +66,7 @@ async def _expire_dead_commands() -> int:
     closed. Distinct from lease expiry (where the command can still
     be re-claimed within the overall TTL).
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     count = 0
     async with async_session_factory() as session:
         result = await session.execute(
@@ -91,7 +91,7 @@ async def _expire_dead_commands() -> int:
 
 async def _expire_approvals() -> int:
     """Mark PENDING approvals whose expiry has passed as EXPIRED."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     count = 0
     async with async_session_factory() as session:
         result = await session.execute(

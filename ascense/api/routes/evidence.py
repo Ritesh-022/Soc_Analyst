@@ -13,7 +13,7 @@ Public API:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -63,7 +63,7 @@ async def attach_evidence(
         evidence_type=body.evidence_type,
         description=body.description,
         storage_reference=body.storage_reference,
-        collected_at=body.collected_at or datetime.now(timezone.utc),
+        collected_at=body.collected_at or datetime.now(UTC),
     )
     session.add(evidence)
 
