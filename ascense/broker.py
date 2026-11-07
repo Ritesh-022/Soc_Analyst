@@ -96,9 +96,8 @@ async def get_channel() -> Channel:
 async def get_exchange() -> Exchange:
     global _exchange
     if _exchange is None:
-        channel = await get_channel()
-        _exchange = await channel.get_exchange(EXCHANGE_NAME)
-    return _exchange
+        await setup_broker()
+    return _exchange  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------

@@ -85,7 +85,10 @@ async def app_client():
         os.environ.setdefault("ASCENSE_RUN_WORKERS", "false")
         from ascense.api.main import create_app
         application = create_app()
-        async with httpx.AsyncClient(app=application, base_url="http://testserver") as client:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=application),
+            base_url="http://testserver",
+        ) as client:
             yield client
     except ImportError:
         pytest.skip("httpx not available")
