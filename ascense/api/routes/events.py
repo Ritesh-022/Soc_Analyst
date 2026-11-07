@@ -257,7 +257,13 @@ async def ingest_event_batch(
             continue
 
         # In production also verify the source URN matches the authenticated gateway
-        if not _is_dev and resolved_gateway_id and not event.source.startswith(f"urn:ascense:gateway:{resolved_gateway_id}/"):
+        if (
+            not _is_dev
+            and resolved_gateway_id
+            and not event.source.startswith(
+                f"urn:ascense:gateway:{resolved_gateway_id}/"
+            )
+        ):
             rejections.append({
                 "index": i,
                 "code": "GATEWAY_ID_MISMATCH",
