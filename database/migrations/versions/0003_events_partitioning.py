@@ -113,6 +113,7 @@ def upgrade() -> None:
             EXECUTE 'CREATE TABLE IF NOT EXISTS events_default'
                 || ' PARTITION OF events_partitioned DEFAULT';
         END;
+        $$;
     """)
 
     # Copy existing data into the partitioned table
