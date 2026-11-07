@@ -9,13 +9,13 @@ Run with: python -m database.seeds.seed_dev
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
-from uuid import uuid7
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 
 from ascense.db import async_session_factory, engine
 from ascense.models import Asset, Gateway, Membership, Tenant, User
+from ascense.utils.uuid7 import uuid7
 
 
 async def seed() -> None:
@@ -57,7 +57,7 @@ async def seed() -> None:
             tenant_id=tenant_id,
             name="Test Gateway 01",
             status="ACTIVE",
-            enrolled_at=datetime.now(timezone.utc),
+            enrolled_at=datetime.now(UTC),
         )
         session.add(gateway)
 
@@ -76,12 +76,12 @@ async def seed() -> None:
                 environment="production",
                 gateway_id=gateway_id,
                 status="active",
-                ip_addresses=[{"address": ip, "first_seen_at": datetime.now(timezone.utc).isoformat()}],
+                ip_addresses=[{"address": ip, "first_seen_at": datetime.now(UTC).isoformat()}],
             )
             session.add(asset)
 
         await session.commit()
-        print(f"Seed data created:")
+        print("Seed data created:")
         print(f"  Tenant ID: {tenant_id}")
         print(f"  User ID:   {user_id}")
         print(f"  Gateway ID: {gateway_id}")

@@ -11,7 +11,7 @@ Deduplication uses (source, id) which maps to
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID, uuid7
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ascense.api.dependencies.auth import get_tenant_id
+from ascense.config import get_settings
 from ascense.db import get_session
 from ascense.models import Event, Outbox
 
@@ -127,6 +128,51 @@ async def ingest_event_batch(
     authenticated_tenant_id = getattr(request.state, "tenant_id", None)
     authenticated_gateway_id = getattr(request.state, "gateway_id", None)
 
+    # Resolve environment once at the top
+    _is_dev = get_settings().is_dev
+
+    # In production, authenticated gateway context is REQUIRED.
+    # In dev mode, we fall back to headers for testing.
+    if _is_dev:
+        tenant_id_str = authenticated_tenant_id or request.headers.get("X-Tenant-ID")
+        gateway_id_str = authenticated_gateway_id or request.headers.get("X-Gateway-ID")
+    else:
+        # Production: authenticated identity ONLY — no payload fallback
+        tenant_id_str = authenticated_tenant_id
+        gateway_id_str = authenticated_gateway_id
+
+        if not tenant_id_str or not gateway_id_str:
+            return EventBatchResponse(
+                batch_id=batch_id,
+                status="rejected",
+                accepted_count=0,
+                rejected_count=len(batch),
+                rejections=[{
+                    "index": 0,
+                    "code": "UNAUTHENTICATED",
+                    "message": "Authenticated gateway context required for event ingestion.",
+                }],
+                received_at=datetime.now(UTC),
+            )
+
+    # Parse the resolved identities once
+    try:
+        resolved_tenant_id = UUID(tenant_id_str) if tenant_id_str else None
+        resolved_gateway_id = UUID(gateway_id_str) if gateway_id_str else None
+    except (ValueError, TypeError):
+        return EventBatchResponse(
+            batch_id=batch_id,
+            status="rejected",
+            accepted_count=0,
+            rejected_count=len(batch),
+            rejections=[{
+                "index": 0,
+                "code": "UNAUTHENTICATED",
+                "message": "Invalid authenticated gateway identity.",
+            }],
+            received_at=datetime.now(UTC),
+        )
+
     for i, event in enumerate(batch):
         # Validate batch size limit
         if i >= MAX_BATCH_SIZE:
@@ -192,67 +238,69 @@ async def ingest_event_batch(
             })
             continue
 
-        # Check for duplicates using (source, id)
-        existing = await session.execute(
-            select(Event.id).where(
-                Event.source == event.source,
-                Event.source_event_id == source_event_id,
-            )
+        # Production: verify payload identity matches authenticated identity
+        if not _is_dev:
+            if event.tenantid and event.tenantid != str(resolved_tenant_id):
+                rejections.append({
+                    "index": i,
+                    "code": "TENANT_MISMATCH",
+                    "message": "tenantid in payload does not match"
+                    " the authenticated gateway tenant.",
+                })
+                continue
+
+            if event.gatewayid and event.gatewayid != str(resolved_gateway_id):
+                rejections.append({
+                    "index": i,
+                    "code": "GATEWAY_ID_MISMATCH",
+                    "message": "gatewayid in payload does not match the authenticated gateway.",
+                })
+                continue
+
+            # Verify source URN contains the authenticated gateway ID
+            if not event.source.startswith(f"urn:ascense:gateway:{resolved_gateway_id}/"):
+                rejections.append({
+                    "index": i,
+                    "code": "GATEWAY_ID_MISMATCH",
+                    "message": "Source URN does not match the authenticated gateway identity.",
+                })
+                continue
+
+        # Check for duplicates using (source, id) scoped to the tenant
+        # to prevent cross-tenant existence leaks
+        dedup_query = select(Event.id).where(
+            Event.source == event.source,
+            Event.source_event_id == source_event_id,
         )
+        if resolved_tenant_id:
+            dedup_query = dedup_query.where(Event.tenant_id == resolved_tenant_id)
+
+        existing = await session.execute(dedup_query)
         if existing.scalar_one_or_none() is not None:
             # Duplicate event — silently skip, do not create another
             accepted += 1
             continue
 
-        # Prefer the authenticated identity when present, but retain a dev/test
-        # fallback for local execution where the gateway identity is not yet
-        # established via mTLS. When the trusted gateway context exists, the
-        # payload values are still validated against it and rejected on mismatch.
-        tenant_id_str = authenticated_tenant_id or event.tenantid
-        gateway_id_str = authenticated_gateway_id or event.gatewayid
+        # Use resolved identities (from authenticated context or dev headers)
+        tenant_id = resolved_tenant_id
+        gateway_id = resolved_gateway_id
 
-        if not tenant_id_str or not gateway_id_str:
-            rejections.append({
-                "index": i,
-                "code": "UNAUTHENTICATED",
-                "message": "Authenticated gateway context required for event ingestion.",
-            })
-            continue
+        if not tenant_id or not gateway_id:
+            # In dev mode without headers, try payload as last resort
+            if _is_dev:
+                try:
+                    tenant_id = UUID(event.tenantid) if event.tenantid else None
+                    gateway_id = UUID(event.gatewayid) if event.gatewayid else None
+                except (ValueError, TypeError):
+                    pass
 
-        if authenticated_tenant_id and event.tenantid and event.tenantid != tenant_id_str:
-            rejections.append({
-                "index": i,
-                "code": "TENANT_MISMATCH",
-                "message": "tenantid in payload does not match the authenticated gateway tenant.",
-            })
-            continue
-
-        if authenticated_gateway_id and event.gatewayid and event.gatewayid != gateway_id_str:
-            rejections.append({
-                "index": i,
-                "code": "GATEWAY_ID_MISMATCH",
-                "message": "gatewayid in payload does not match the authenticated gateway.",
-            })
-            continue
-
-        if not event.source.startswith(f"urn:ascense:gateway:{gateway_id_str}/"):
-            rejections.append({
-                "index": i,
-                "code": "GATEWAY_ID_MISMATCH",
-                "message": "Source URN does not match the authenticated gateway identity.",
-            })
-            continue
-
-        try:
-            tenant_id = UUID(tenant_id_str)
-            gateway_id = UUID(gateway_id_str)
-        except (ValueError, TypeError):
-            rejections.append({
-                "index": i,
-                "code": "UNAUTHENTICATED",
-                "message": "Invalid authenticated gateway identity.",
-            })
-            continue
+            if not tenant_id or not gateway_id:
+                rejections.append({
+                    "index": i,
+                    "code": "UNAUTHENTICATED",
+                    "message": "Unable to resolve tenant and gateway identity for this event.",
+                })
+                continue
 
         # Create the normalized event record
         event_record = Event(
@@ -266,7 +314,7 @@ async def ingest_event_batch(
             sensor_instance_id=sensor_info.get("instance_id", "unknown"),
             event_kind=data.get("event_kind", "network.connection"),
             observed_at=event.time,
-            ingested_at=datetime.utcnow(),
+            ingested_at=datetime.now(UTC),
             asset_resolution_status=asset_res.get("status", "UNRESOLVED"),
             source_asset_id=(
                 UUID(asset_res["source_asset_id"])
@@ -281,7 +329,6 @@ async def ingest_event_batch(
         session.add(event_record)
 
         # Write outbox record in the same transaction (transactional outbox pattern)
-        # The normalization worker consumes this and publishes telemetry.event.normalized.v1
         outbox_record = Outbox(
             id=uuid7(),
             tenant_id=tenant_id,
@@ -311,7 +358,7 @@ async def ingest_event_batch(
         accepted_count=accepted,
         rejected_count=len(rejections),
         rejections=rejections,
-        received_at=datetime.utcnow(),
+        received_at=datetime.now(UTC),
     )
 
 

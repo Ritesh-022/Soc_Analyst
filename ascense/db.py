@@ -3,6 +3,11 @@
 Uses SQLAlchemy 2.0 async with asyncpg. Every tenant-owned query must include
 a tenant_id filter — the tenant authorization middleware enforces this at the
 API layer, and repository functions accept tenant_id explicitly.
+
+For defense-in-depth, routes that operate on tenant-owned data should use
+get_tenant_session() which sets app.tenant_id via SET LOCAL, enabling
+PostgreSQL Row-Level Security policies to block cross-tenant access at the
+database level.
 """
 
 from __future__ import annotations
@@ -10,7 +15,9 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from uuid import UUID
 
+from fastapi import Request
 from sqlalchemy import MetaData
+from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -62,7 +69,12 @@ class TenantMixin:
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI dependency that provides a database session."""
+    """FastAPI dependency that provides a database session.
+
+    Use this for routes that don't need RLS enforcement (e.g., internal
+    service endpoints, health checks). For tenant-scoped routes, use
+    get_tenant_session() instead.
+    """
     async with async_session_factory() as session:
         try:
             yield session
@@ -70,3 +82,44 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
+
+
+async def get_tenant_session(
+    request: Request,
+) -> AsyncGenerator[AsyncSession, None]:
+    """FastAPI dependency that provides a session with RLS tenant context.
+
+    Sets `app.tenant_id` via SET LOCAL so that Row-Level Security policies
+    enforce tenant isolation at the database level. This is defense-in-depth:
+    even if a query forgets to filter by tenant_id, RLS blocks cross-tenant
+    access.
+
+    If tenant_id is not set on the request state (e.g. unauthenticated request),
+    no RLS context is established — policies are fail-closed, so queries
+    will return zero rows from tenant-owned tables.
+    """
+    tenant_id = getattr(request.state, "tenant_id", None)
+    async with async_session_factory() as session:
+        if tenant_id:
+            await session.execute(
+                sa_text("SET LOCAL app.tenant_id = :tenant_id"),
+                {"tenant_id": str(tenant_id)},
+            )
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+
+async def set_tenant_context(session: AsyncSession, tenant_id: UUID) -> None:
+    """Set the tenant context on a session for worker/background use.
+
+    Workers must call this before processing tenant-scoped data to ensure
+    RLS policies are enforced.
+    """
+    await session.execute(
+        sa_text("SET LOCAL app.tenant_id = :tenant_id"),
+        {"tenant_id": str(tenant_id)},
+    )

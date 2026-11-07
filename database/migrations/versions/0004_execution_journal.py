@@ -1,7 +1,7 @@
 """Add execution_journal table for durable gateway-side recording.
 
 Revision ID: 0004_execution_journal
-Revises: 0003_events_partitioning
+Revises: 0005_merge_heads (merged from both 0003 branches)
 Create Date: 2026-11-06
 
 The execution journal is a durable record that the gateway creates
@@ -16,16 +16,16 @@ does not re-execute.
 
 from __future__ import annotations
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "0004_execution_journal"
-down_revision: Union[str, None] = "0003_events_partitioning"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "0005_merge_heads"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -44,16 +44,37 @@ def upgrade() -> None:
         sa.Column("command_hash", sa.String(128), nullable=False),
         sa.Column("action_type", sa.String(128), nullable=False),
         sa.Column("target", postgresql.JSONB, nullable=False),
-        sa.Column("journal_status", sa.String(32), nullable=False, server_default="PENDING"),
+        sa.Column(
+            "journal_status", sa.String(32),
+            nullable=False, server_default="PENDING",
+        ),
         sa.Column("execution_result", postgresql.JSONB),
-        sa.Column("recorded_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "recorded_at", sa.DateTime(timezone=True),
+            nullable=False, server_default=sa.func.now(),
+        ),
         sa.Column("completed_at", sa.DateTime(timezone=True)),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True),
+            nullable=False, server_default=sa.func.now(),
+        ),
     )
-    op.create_index("ix_execution_journal_command_id", "execution_journal", ["command_id"])
-    op.create_index("ix_execution_journal_tenant_id", "execution_journal", ["tenant_id"])
-    op.create_index("ix_execution_journal_gateway_id", "execution_journal", ["gateway_id"])
-    op.create_index("ix_execution_journal_idempotency_key", "execution_journal", ["idempotency_key"])
+    op.create_index(
+        "ix_execution_journal_command_id",
+        "execution_journal", ["command_id"],
+    )
+    op.create_index(
+        "ix_execution_journal_tenant_id",
+        "execution_journal", ["tenant_id"],
+    )
+    op.create_index(
+        "ix_execution_journal_gateway_id",
+        "execution_journal", ["gateway_id"],
+    )
+    op.create_index(
+        "ix_execution_journal_idempotency_key",
+        "execution_journal", ["idempotency_key"],
+    )
 
 
 def downgrade() -> None:

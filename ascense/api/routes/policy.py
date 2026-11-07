@@ -29,10 +29,37 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ascense.api.dependencies.auth import get_tenant_id, require_role
+from ascense.config import get_settings
 from ascense.db import get_session
 from ascense.models import ActionProposal, PolicyVersion
 
 router = APIRouter(tags=["Policy"])
+
+
+# ---------------------------------------------------------------------------
+# Internal service authentication — reuse the same dependency as commands
+# ---------------------------------------------------------------------------
+
+async def _require_internal_service_auth(
+    request: Request,
+) -> None:
+    """Require internal service auth on /internal/v1/policy/ endpoints."""
+    import hmac
+
+    from ascense.api.routes.commands import _auth_token_from_request
+
+    token = _auth_token_from_request(request)
+    if token is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Internal service authentication required",
+        )
+    expected = get_settings().INTERNAL_SERVICE_TOKEN
+    if not token or not hmac.compare_digest(token, expected):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid internal service credential",
+        )
 
 # ---------------------------------------------------------------------------
 # Protected assets — these must NEVER be automatically blocked
@@ -82,6 +109,7 @@ class PolicyCreateRequest(BaseModel):
 @router.post("/internal/v1/policy/evaluate")
 async def evaluate_policy(
     body: PolicyEvaluationRequest,
+    _auth: None = Depends(_require_internal_service_auth),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Evaluate an action proposal against the active policy.

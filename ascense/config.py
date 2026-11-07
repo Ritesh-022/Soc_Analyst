@@ -20,7 +20,16 @@ from pathlib import Path
 _PLACEHOLDER_SECRETS = {
     "dev-secret-change-me",
     "dev-command-signing-key-change-in-production",
+    "dev-internal-service-token",
 }
+
+# Default dev passwords that must not be used in production
+_DEV_PASSWORDS = frozenset({
+    "ascense_dev_password",
+    "dev-secret-change-me",
+    "dev-command-signing-key-change-in-production",
+    "dev-internal-service-token",
+})
 
 
 class Settings:
@@ -56,15 +65,43 @@ class Settings:
                 "COMMAND_SIGNING_KEY must be set to a 256-bit random key "
                 "in production (current value is a placeholder)"
             )
+        if self.INTERNAL_SERVICE_TOKEN in _PLACEHOLDER_SECRETS:
+            errors.append(
+                "INTERNAL_SERVICE_TOKEN must be set to a strong random value "
+                "in production (current value is a placeholder)"
+            )
         if not self.JWKS_URL:
             errors.append(
                 "JWKS_URL must be configured in production "
                 "(OIDC token validation requires a JWKS endpoint)"
             )
+        if not self.GATEWAY_CA_CERT:
+            errors.append(
+                "GATEWAY_CA_CERT must be configured in production "
+                "(gateway mTLS certificate verification requires a CA)"
+            )
         if self.DEBUG:
             errors.append(
                 "DEBUG=true is not allowed in production"
             )
+
+        # Check database credentials
+        if "ascense_dev_password" in self.DATABASE_URL:
+            errors.append(
+                "DATABASE_URL must not use the default dev password "
+                "in production"
+            )
+        if "ascense_dev_password" in self.RABBITMQ_URL:
+            errors.append(
+                "RABBITMQ_URL must not use the default dev password "
+                "in production"
+            )
+        if self.S3_SECRET_KEY in _DEV_PASSWORDS:
+            errors.append(
+                "S3_SECRET_KEY must not use the default dev password "
+                "in production"
+            )
+
         return errors
 
     # Database
@@ -117,6 +154,8 @@ class Settings:
     # Gateway mTLS
     # Path to the CA certificate PEM file used to verify gateway client certificates
     GATEWAY_CA_CERT: str = os.getenv("GATEWAY_CA_CERT", "")
+    # Path to the CA private key PEM file used to sign gateway CSRs at enrollment
+    GATEWAY_CA_KEY: str = os.getenv("GATEWAY_CA_KEY", "")
 
     # Contracts directory
     CONTRACTS_DIR: Path = Path(__file__).resolve().parent.parent / "contracts"

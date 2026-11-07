@@ -9,11 +9,13 @@ Public API:
 Edge API:
   POST /edge/v1/gateways/{gateway_id}/heartbeat — gateway heartbeat
   GET  /edge/v1/gateways/{gateway_id}/configuration — authorized config
+  POST /edge/v1/gateways/enrollment — CSR-based certificate enrollment
 """
 
 from __future__ import annotations
 
 import contextlib
+import hashlib
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid7
 
@@ -23,10 +25,61 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ascense.api.dependencies.auth import get_tenant_id, require_role
+from ascense.config import get_settings
 from ascense.db import get_session
-from ascense.models import EnrollmentToken, Gateway
+from ascense.models import EnrollmentToken, Gateway, GatewayCertificate
 
 router = APIRouter(tags=["Gateways"])
+
+
+# ---------------------------------------------------------------------------
+# Identity verification helper
+# ---------------------------------------------------------------------------
+
+def _verify_gateway_identity(request: Request, url_gateway_id: UUID) -> None:
+    """Verify that the authenticated mTLS identity matches the gateway_id in the URL.
+
+    In production, the mTLS middleware sets request.state.gateway_id from
+    the verified certificate. This function ensures the URL parameter
+    matches that authenticated identity.
+
+    In dev mode, the X-Gateway-ID header is accepted.
+    """
+    _is_dev = get_settings().is_dev
+
+    if _is_dev:
+        # Dev mode: accept X-Gateway-ID header
+        header_gateway_id = request.headers.get("X-Gateway-ID")
+        if header_gateway_id and header_gateway_id == str(url_gateway_id):
+            return
+        # Also accept if the middleware already set it
+        state_gateway_id = getattr(request.state, "gateway_id", None)
+        if state_gateway_id and state_gateway_id == str(url_gateway_id):
+            return
+        # In dev, if neither is set, allow it (simulator may not send headers)
+        return
+
+    # Production: the mTLS middleware must have set gateway_id
+    state_gateway_id = getattr(request.state, "gateway_id", None)
+    if not state_gateway_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Authenticated gateway identity required.",
+        )
+
+    try:
+        auth_gateway_id = UUID(str(state_gateway_id))
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authenticated gateway identity.",
+        ) from exc
+
+    if auth_gateway_id != url_gateway_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Gateway ID in URL does not match the authenticated certificate identity.",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -215,8 +268,13 @@ async def gateway_heartbeat(
     request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Gateway heartbeat with sensor health. Verifies gateway_id matches
-    the authenticated certificate identity."""
+    """Gateway heartbeat with sensor health.
+
+    Verifies that the gateway_id in the URL matches the authenticated
+    mTLS certificate identity.
+    """
+    _verify_gateway_identity(request, gateway_id)
+
     result = await session.execute(
         select(Gateway).where(Gateway.id == gateway_id)
     )
@@ -254,31 +312,38 @@ async def gateway_heartbeat(
 
 
 # ---------------------------------------------------------------------------
-# Edge API: Gateway enrollment
+# Edge API: Gateway enrollment (CSR-based)
 # ---------------------------------------------------------------------------
 
-class EnrollmentRequest(BaseModel):
-    """Gateway submits its enrollment token to receive a certificate."""
+class CSREnrollmentRequest(BaseModel):
+    """Gateway submits a CSR along with its one-time enrollment token.
+
+    The gateway generates its own private key locally and creates a CSR
+    from it. The platform validates the token and signs the CSR using
+    the gateway CA. The private key never leaves the gateway.
+    """
     token: str = Field(..., description="One-time enrollment token")
     gateway_id: str = Field(..., description="Gateway UUID from token creation")
+    csr_pem: str = Field(..., description="PEM-encoded Certificate Signing Request")
     hostname: str | None = Field(None, description="Gateway hostname for certificate CN")
 
 
 @router.post("/edge/v1/gateways/enrollment", status_code=status.HTTP_201_CREATED)
 async def enroll_gateway(
-    body: EnrollmentRequest,
+    body: CSREnrollmentRequest,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Complete gateway enrollment: validate the token, issue a certificate,
-    and transition the gateway to ACTIVE.
+    """Complete gateway enrollment via CSR signing.
 
-    In production, the gateway submits its CSR (certificate signing request)
-    and the platform signs it with the gateway CA. In development, a
-    self-signed certificate is generated for testing.
+    The gateway generates its private key locally and submits a CSR.
+    The platform validates the enrollment token and signs the CSR using
+    the gateway CA. The signed certificate and CA chain are returned —
+    never the private key.
 
-    The enrollment token is single-use — it cannot be reused.
+    This endpoint is exempt from normal gateway mTLS (the gateway has
+    no certificate yet). Authentication is via the one-time enrollment token.
     """
-    from ascense.models import GatewayCertificate
+    _is_dev = get_settings().is_dev
 
     # Validate the token
     result = await session.execute(
@@ -314,42 +379,104 @@ async def enroll_gateway(
             detail=f"Gateway is in status {gateway.status}, cannot enroll",
         )
 
-    # Generate a self-signed certificate for the gateway
-    # In production, this would sign a CSR with the platform CA
-    import hashlib
-
+    # Parse the CSR
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
-    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives.asymmetric import ec, rsa
     from cryptography.x509.oid import NameOID
 
-    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    common_name = body.hostname or f"gateway-{str(gateway.id)[:8]}"
+    try:
+        csr = x509.load_pem_x509_csr(body.csr_pem.encode())
+    except Exception:
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid CSR: could not parse PEM-encoded CSR",
+        ) from None
 
-    subject = issuer = x509.Name([
-        x509.NameAttribute(NameOID.COMMON_NAME, common_name),
+    # Verify the CSR signature is valid (the gateway's key proves possession)
+    if not csr.is_signature_valid:
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid CSR: signature verification failed",
+        )
+
+    # Build the certificate subject — must include the gateway UUID as CN
+    # so the mTLS middleware can bind the certificate to the gateway
+    gateway_uuid_str = str(gateway.id)
+    subject = x509.Name([
+        x509.NameAttribute(NameOID.COMMON_NAME, gateway_uuid_str),
         x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Ascense"),
     ])
 
-    cert = (
-        x509.CertificateBuilder()
-        .subject_name(subject)
-        .issuer_name(issuer)
-        .public_key(private_key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(datetime.now(UTC))
-        .not_valid_after(datetime.now(UTC) + timedelta(days=365))
-        .add_extension(
-            x509.SubjectAlternativeName([x509.DNSName(common_name)]),
-            critical=False,
+    cert_validity = timedelta(days=365)
+    not_before = datetime.now(UTC)
+    not_after = not_before + cert_validity
+
+    if _is_dev:
+        # Dev mode: sign the CSR with a self-generated key (no CA configured)
+        dev_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        cert_builder = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(subject)  # self-signed in dev
+            .public_key(csr.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(not_before)
+            .not_valid_after(not_after)
+            .add_extension(
+                x509.SubjectAlternativeName([x509.DNSName(gateway_uuid_str)]),
+                critical=False,
+            )
         )
-        .sign(private_key, hashes.SHA256())
-    )
+        cert = cert_builder.sign(dev_key, hashes.SHA256())
+
+        # CA chain is just the cert itself in dev mode
+        ca_chain_pem = cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
+    else:
+        # Production: sign the CSR with the gateway CA
+        ca_cert = _load_gateway_ca_cert()
+        if ca_cert is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Gateway CA certificate not configured — cannot sign CSR",
+            )
+
+        ca_key = _load_gateway_ca_key()
+        if ca_key is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Gateway CA private key not configured — cannot sign CSR",
+            )
+
+        cert_builder = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(ca_cert.subject)
+            .public_key(csr.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(not_before)
+            .not_valid_after(not_after)
+            .add_extension(
+                x509.SubjectAlternativeName([x509.DNSName(gateway_uuid_str)]),
+                critical=False,
+            )
+        )
+
+        if isinstance(ca_key, (rsa.RSAPrivateKey, ec.EllipticCurvePrivateKey)):
+            cert = cert_builder.sign(ca_key, hashes.SHA256())
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail="Unsupported CA key type for signing",
+            )
+
+        # Return the CA chain
+        ca_chain_pem = ca_cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
 
     cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
     fingerprint = hashlib.sha256(cert_pem.encode()).hexdigest()
 
-    # Store the certificate
+    # Store the certificate record
     gateway_cert = GatewayCertificate(
         id=uuid7(),
         gateway_id=gateway.id,
@@ -357,7 +484,7 @@ async def enroll_gateway(
         fingerprint=fingerprint,
         certificate_pem=cert_pem,
         issued_at=datetime.now(UTC),
-        expires_at=datetime.now(UTC) + timedelta(days=365),
+        expires_at=not_after,
         status="ACTIVE",
     )
     session.add(gateway_cert)
@@ -367,7 +494,7 @@ async def enroll_gateway(
     gateway.enrolled_at = datetime.now(UTC)
     gateway.certificate_fingerprint = fingerprint
     gateway.certificate_issued_at = datetime.now(UTC)
-    gateway.certificate_expires_at = datetime.now(UTC) + timedelta(days=365)
+    gateway.certificate_expires_at = not_after
 
     # Mark token as used
     token.used_at = datetime.now(UTC)
@@ -378,9 +505,54 @@ async def enroll_gateway(
         "gateway_id": str(gateway.id),
         "status": gateway.status,
         "certificate": cert_pem,
+        "ca_chain": ca_chain_pem,
         "certificate_fingerprint": fingerprint,
         "certificate_expires_at": gateway.certificate_expires_at.isoformat(),
     }
+
+
+def _load_gateway_ca_cert():
+    """Load the gateway CA certificate from the configured path."""
+    from pathlib import Path
+
+    from cryptography import x509 as _x509
+
+    ca_cert_path = get_settings().GATEWAY_CA_CERT
+    if not ca_cert_path:
+        return None
+    try:
+        p = Path(ca_cert_path)
+        if p.exists():
+            return _x509.load_pem_x509_certificate(p.read_bytes())
+        # Try as inline PEM
+        return _x509.load_pem_x509_certificate(ca_cert_path.encode())
+    except Exception:
+        return None
+
+
+def _load_gateway_ca_key():
+    """Load the gateway CA private key from the configured path."""
+    import os
+    from pathlib import Path
+
+    from cryptography.hazmat.primitives import serialization
+
+    ca_key_path = os.getenv("GATEWAY_CA_KEY", "")
+    if not ca_key_path:
+        return None
+    try:
+        p = Path(ca_key_path)
+        if p.exists():
+            return serialization.load_pem_private_key(
+                p.read_bytes(),
+                password=None,
+            )
+        return serialization.load_pem_private_key(
+            ca_key_path.encode(),
+            password=None,
+        )
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -395,10 +567,11 @@ async def get_gateway_configuration(
 ) -> dict:
     """Return the authorized configuration for a gateway.
 
-    In production, the gateway_id is verified against the authenticated
-    mTLS certificate. The configuration includes sensor definitions,
-    allowed event types, and collection parameters.
+    Verifies that the gateway_id matches the authenticated mTLS certificate
+    identity.
     """
+    _verify_gateway_identity(request, gateway_id)
+
     result = await session.execute(
         select(Gateway).where(Gateway.id == gateway_id)
     )

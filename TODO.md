@@ -88,7 +88,7 @@
 - [x] `infrastructure/compose/docker-compose.yml` with PostgreSQL, RabbitMQ, Redis, MinIO, Jaeger
 - [x] `Makefile` targets working: `docker-up`, `docker-down`, `migrate`, `dev-api`, `dev-web`
 - [x] `.env.example` with all required environment variables
-- [x] CI pipeline configured (`ci.yml`) with contract tests, lint, and frontend build on every PR
+- [x] CI pipeline configured (`ci.yml`) with contract tests, lint, frontend build, and integration tests (PostgreSQL + RabbitMQ services) on every PR
 
 ### Database ✅
 - [x] Alembic migration setup (`alembic.ini`, `database/migrations/env.py`)
@@ -102,6 +102,7 @@
 - [x] Tenant-scoped indexes on all major tables
 - [x] Row-level security policies written (`database/policies/rls.sql`) — apply with `make apply-rls`
 - [ ] RLS policies applied to database (run `make apply-rls` after migration)
+- [x] Restricted application DB role — `get_tenant_session()` sets `SET LOCAL app.tenant_id` for RLS enforcement; `set_tenant_context()` helper for workers
 
 ### Platform API — foundation ✅
 - [x] FastAPI app skeleton (`ascense/api/main.py`) with lifespan, middleware, routers
@@ -124,10 +125,11 @@
 - [x] `GET /api/v1/gateways` — list with cursor pagination, tenant-scoped
 - [x] `GET /api/v1/gateways/{gateway_id}` — 403 on cross-tenant
 - [x] `POST /edge/v1/gateways/{gateway_id}/heartbeat` — updates health, sensor status
-- [x] Full gateway enrollment flow — `POST /edge/v1/gateways/enrollment` validates token, issues self-signed cert, transitions to ACTIVE
+- [x] Full gateway enrollment flow — `POST /edge/v1/gateways/enrollment` validates token, accepts CSR, signs with gateway CA (or self-signed in dev), returns cert + CA chain
 - [x] `GET /edge/v1/gateways/{gateway_id}/configuration` — returns authorized sensor config and allowed event types
-- [ ] mTLS verification — gateway_id matched against certificate (currently no mTLS, uses header)
+- [x] mTLS verification — middleware validates certificate chain against GATEWAY_CA_CERT, checks expiry, binds CN/SAN to gateway_id in URL, stores verified identity on request.state
 - [ ] Certificate storage with OS-level protection
+- [x] Enrollment endpoint exempted from mTLS (uses one-time token auth instead)
 
 ### Message broker ✅
 - [x] RabbitMQ exchange/queue names and routing keys defined (`ascense/broker.py`)
@@ -162,6 +164,8 @@
 - [x] `202 Accepted` response with `accepted_count`, `rejected_count`, per-item rejection detail
 - [x] Payload size limits enforced (MAX_BATCH_SIZE=1000, MAX_PAYLOAD_BYTES=10MB)
 - [x] `tenantid`/`gatewayid` verified against authenticated gateway identity — route rejects payload mismatches and enforces authenticated gateway context
+- [x] Production mode rejects events when authenticated context is missing (no payload fallback); dev mode retains header fallback
+- [x] Dedup query scoped by tenant_id to prevent cross-tenant existence leaks
 
 ### Normalization worker ✅
 - [x] Normalization worker (`ascense/workers/ingestion/worker.py`) — consumes `telemetry.batch.accepted.v1` from RabbitMQ
@@ -186,6 +190,8 @@
 - [x] Automated end-to-end trace: event ingested → stored → retrieved → dedup verified (`tests/integration/test_event_pipeline.py`)
 - [x] Dashboard shows `TELEMETRY_STALE` when simulator stops — GatewaysPage displays TELEMETRY_STALE with visual indicator
 - [x] Events table partitioned by time (migration `0003_events_partitioning.py`)
+- [x] Partitioned events table uses composite primary key (id, observed_at) — compatible with PostgreSQL partition key requirement
+- [x] Alembic migration graph merged to single head (merge migration `0005_merge_heads.py`)
 
 ---
 
@@ -263,7 +269,7 @@
 ### Policy engine
 - [x] OPA/Rego safety gate — implemented as Python policy engine in `ascense/api/routes/policy.py`
 - [x] Schema check, permission check, protected-asset check, blast-radius check, reversibility check, confidence check
-- [x] `POST /internal/v1/policy/evaluate` — returns ALLOW/DENY/REQUIRE_APPROVAL with per-check results
+- [x] `POST /internal/v1/policy/evaluate` — returns ALLOW/DENY/REQUIRE_APPROVAL with per-check results (internal service auth required)
 - [x] `GET /api/v1/policies` — list policy versions for tenant
 - [x] `POST /api/v1/policies` — create new policy version (admin only)
 - [ ] Rate-of-change check — needs Redis counter for per-hour/day action tracking
@@ -353,8 +359,9 @@
 
 ### Security tests
 - [ ] All `/api/v1/` endpoints reject unauthenticated requests with `401` *(needs integration test with no headers)*
-- [ ] All `/edge/v1/` endpoints require valid gateway mTLS certificate *(mTLS not yet enforced)*
+- [x] All `/edge/v1/` endpoints require valid gateway mTLS certificate *(mTLS middleware implemented with chain validation, expiry check, and CN/SAN binding)*
 - [x] All `/internal/v1/` endpoints use `/internal/v1/` prefix — verified `test_stage7_negative.py`
+- [x] All `/internal/v1/` endpoints require internal service auth (including policy/evaluate)
 - [x] RBAC enforced — `require_role` on proposals and approvals routes
 - [ ] SQL injection attempts in query parameters rejected *(needs integration test)*
 - [x] Oversized payloads rejected — `MAX_BATCH_SIZE=1000`, `MAX_PAYLOAD_BYTES=10MB` enforced

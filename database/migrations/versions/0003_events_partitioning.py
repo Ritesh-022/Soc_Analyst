@@ -9,7 +9,9 @@ partitioning by observed_at (monthly) keeps queries fast and allows
 old partitions to be archived or dropped without affecting current data.
 
 This migration:
-1. Creates a new partitioned events table
+1. Creates a new partitioned table with a composite primary key
+   (id, observed_at) — PostgreSQL requires the partition key in all
+   unique constraints including the primary key
 2. Creates monthly partitions for the current and next two months
 3. Copies data from the old events table
 4. Drops the old table and renames the new one
@@ -22,16 +24,14 @@ convenience.
 
 from __future__ import annotations
 
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-import sqlalchemy as sa
 from alembic import op
-from sqlalchemy.dialects import postgresql
 
 revision: str = "0003_events_partitioning"
-down_revision: Union[str, None] = "0002_outbox_and_audit"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = "0002_outbox_and_audit"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
@@ -46,7 +46,8 @@ def upgrade() -> None:
             start_date timestamptz;
             end_date timestamptz;
         BEGIN
-            partition_name := 'events_y' || partition_year || '_m' || lpad(partition_month::text, 2, '0');
+            partition_name := 'events_y' || partition_year
+                || '_m' || lpad(partition_month::text, 2, '0');
             start_date := make_timestamptz(partition_year, partition_month, 1, 0, 0, 0);
             end_date := start_date + interval '1 month';
 
@@ -59,15 +60,33 @@ def upgrade() -> None:
         $$ LANGUAGE plpgsql;
     """)
 
-    # Create the new partitioned table with a temporary name
+    # Create the new partitioned table with a composite primary key.
+    # PostgreSQL requires the partition key (observed_at) to be included
+    # in all unique constraints and the primary key of a partitioned table.
+    # We use LIKE events INCLUDING DEFAULTS INCLUDING CONSTRAINTS to copy
+    # column definitions, but we explicitly define the primary key with
+    # the partition key included.
     op.execute("""
         CREATE TABLE events_partitioned (
-            LIKE events INCLUDING ALL
+            LIKE events INCLUDING DEFAULTS INCLUDING GENERATED INCLUDING CONSTRAINTS
         ) PARTITION BY RANGE (observed_at);
     """)
 
+    # Drop the copied id-only primary key and replace with a composite one
+    op.execute("""
+        ALTER TABLE events_partitioned
+        DROP CONSTRAINT IF EXISTS events_pkey;
+    """)
+    op.execute("""
+        ALTER TABLE events_partitioned
+        DROP CONSTRAINT IF EXISTS events_partitioned_pkey;
+    """)
+    op.execute("""
+        ALTER TABLE events_partitioned
+        ADD CONSTRAINT events_partitioned_pkey PRIMARY KEY (id, observed_at);
+    """)
+
     # Create partitions for current month and next two months
-    # Using dynamic SQL since we don't know the exact date at migration time
     op.execute("""
         DO $$
         DECLARE
@@ -80,7 +99,8 @@ def upgrade() -> None:
             FOR i IN 0..2 LOOP
                 start_date := cur_date + (i || ' months')::interval;
                 end_date := start_date + interval '1 month';
-                part_name := 'events_y' || to_char(start_date, 'YYYY') || '_m' || to_char(start_date, 'MM');
+                part_name := 'events_y' || to_char(start_date, 'YYYY')
+                    || '_m' || to_char(start_date, 'MM');
 
                 EXECUTE format(
                     'CREATE TABLE IF NOT EXISTS %I PARTITION OF events_partitioned
@@ -90,7 +110,8 @@ def upgrade() -> None:
             END LOOP;
 
             -- Create a default partition for any out-of-range dates
-            EXECUTE 'CREATE TABLE IF NOT EXISTS events_default PARTITION OF events_partitioned DEFAULT';
+            EXECUTE 'CREATE TABLE IF NOT EXISTS events_default'
+                || ' PARTITION OF events_partitioned DEFAULT';
         END;
     """)
 
@@ -104,10 +125,9 @@ def upgrade() -> None:
     # Drop the old table and rename
     op.execute("DROP TABLE events CASCADE;")
     op.execute("ALTER TABLE events_partitioned RENAME TO events;")
-    op.execute("ALTER INDEX events_pkey RENAME TO events_pkey;")
+    op.execute("ALTER INDEX events_partitioned_pkey RENAME TO events_pkey;")
 
-    # Recreate tenant-scoped indexes (the LIKE INCLUDING ALL copies indexes
-    # but with different names after rename, so recreate them explicitly)
+    # Recreate tenant-scoped indexes
     op.create_index("ix_events_tenant_id", "events", ["tenant_id"])
     op.create_index("ix_events_source", "events", ["source", "source_event_id"])
     op.create_index("ix_events_observed_at", "events", ["observed_at"])

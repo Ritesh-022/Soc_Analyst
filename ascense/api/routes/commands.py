@@ -42,6 +42,48 @@ from ascense.models import (
 )
 from ascense.workers.response.worker import create_signed_command
 
+
+def _verify_gateway_identity(request: Request, url_gateway_id: UUID) -> None:
+    """Verify that the authenticated mTLS identity matches the gateway_id in the URL.
+
+    In production, the mTLS middleware sets request.state.gateway_id from
+    the verified certificate. This function ensures the URL parameter
+    matches that authenticated identity.
+    """
+    _is_dev = get_settings().is_dev
+
+    if _is_dev:
+        # Dev mode: accept X-Gateway-ID header or state
+        state_gateway_id = getattr(request.state, "gateway_id", None)
+        header_gateway_id = request.headers.get("X-Gateway-ID")
+        if state_gateway_id and state_gateway_id == str(url_gateway_id):
+            return
+        if header_gateway_id and header_gateway_id == str(url_gateway_id):
+            return
+        return  # permissive in dev
+
+    # Production: mTLS middleware must have set gateway_id
+    state_gateway_id = getattr(request.state, "gateway_id", None)
+    if not state_gateway_id:
+        raise HTTPException(
+            status_code=401,
+            detail="Authenticated gateway identity required.",
+        )
+
+    try:
+        auth_gateway_id = UUID(str(state_gateway_id))
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authenticated gateway identity.",
+        ) from exc
+
+    if auth_gateway_id != url_gateway_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Gateway ID in URL does not match the authenticated certificate identity.",
+        )
+
 router = APIRouter(tags=["Commands"])
 
 
@@ -226,6 +268,8 @@ async def claim_command(
     expiry window; if not acknowledged within that window, the command
     returns to QUEUED.
     """
+    _verify_gateway_identity(request, gateway_id)
+
     from datetime import timedelta
 
     result = await session.execute(
@@ -284,6 +328,7 @@ async def claim_command(
 async def acknowledge_command(
     gateway_id: UUID,
     command_id: UUID,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Gateway confirms it has received and accepted the command.
@@ -291,6 +336,8 @@ async def acknowledge_command(
     Transitions command from LEASED → ACKNOWLEDGED.
     After this point, the gateway will execute the command.
     """
+    _verify_gateway_identity(request, gateway_id)
+
     result = await session.execute(
         select(Command).where(
             Command.id == command_id,
@@ -326,6 +373,7 @@ async def report_execution_result(
     gateway_id: UUID,
     command_id: UUID,
     body: ExecutionResultRequest,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Gateway reports the execution result for a command.
@@ -337,6 +385,8 @@ async def report_execution_result(
     verification_status is set by the verification service only.
     UNKNOWN execution_status must trigger escalation.
     """
+    _verify_gateway_identity(request, gateway_id)
+
     from uuid import uuid7
 
     result = await session.execute(
