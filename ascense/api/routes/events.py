@@ -238,26 +238,26 @@ async def ingest_event_batch(
             })
             continue
 
-        # Production: verify payload identity matches authenticated identity
-        if not _is_dev:
-            if event.tenantid and event.tenantid != str(resolved_tenant_id):
-                rejections.append({
-                    "index": i,
-                    "code": "TENANT_MISMATCH",
-                    "message": "tenantid in payload does not match"
-                    " the authenticated gateway tenant.",
-                })
-                continue
+        # Verify payload identity matches resolved identity whenever one is established.
+        # This applies in both dev (X-Gateway-ID header) and production (mTLS cert).
+        if resolved_gateway_id and event.gatewayid and event.gatewayid != str(resolved_gateway_id):
+            rejections.append({
+                "index": i,
+                "code": "GATEWAY_ID_MISMATCH",
+                "message": "gatewayid in payload does not match the authenticated gateway.",
+            })
+            continue
 
-            if event.gatewayid and event.gatewayid != str(resolved_gateway_id):
-                rejections.append({
-                    "index": i,
-                    "code": "GATEWAY_ID_MISMATCH",
-                    "message": "gatewayid in payload does not match the authenticated gateway.",
-                })
-                continue
+        if resolved_tenant_id and event.tenantid and event.tenantid != str(resolved_tenant_id):
+            rejections.append({
+                "index": i,
+                "code": "TENANT_MISMATCH",
+                "message": "tenantid in payload does not match the authenticated gateway tenant.",
+            })
+            continue
 
-            # Verify source URN contains the authenticated gateway ID
+        # In production also verify the source URN matches the authenticated gateway
+        if not _is_dev and resolved_gateway_id:
             if not event.source.startswith(f"urn:ascense:gateway:{resolved_gateway_id}/"):
                 rejections.append({
                     "index": i,
