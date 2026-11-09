@@ -198,53 +198,37 @@ def _has_approved_gateway_profile(cert: x509.Certificate) -> bool:
 
 
 def _extract_gateway_id_from_cert(cert: x509.Certificate) -> UUID | None:
-    """Extract the gateway UUID from the certificate's CN or SAN.
+    """Extract one consistent gateway UUID from CN and DNS SAN identities."""
+    import re
 
-    The certificate CN or a DNS SAN entry should contain the gateway UUID.
-    Returns None if no valid UUID is found.
-    """
-    # Try CN first
+    pattern = re.compile(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+        re.IGNORECASE,
+    )
+    values: list[str] = []
     try:
-        cn_attrs = cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
-        if cn_attrs:
-            cn_value = str(cn_attrs[0].value)
-            # The CN may be "gateway-{uuid}" or just the UUID
-            # Try to extract a UUID from the CN
-            try:
-                return UUID(cn_value)
-            except ValueError:
-                # Try to find a UUID pattern in the CN
-                import re
-                uuid_match = re.search(
-                    r"[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
-                    cn_value,
-                    re.IGNORECASE,
-                )
-                if uuid_match:
-                    return UUID(uuid_match.group())
-    except Exception:
-        logger.debug("mtls.cn_parse_failed")
-
-    # Try SAN DNS names
-    try:
+        values.extend(
+            str(attribute.value)
+            for attribute in cert.subject.get_attributes_for_oid(
+                x509.NameOID.COMMON_NAME
+            )
+        )
         san_ext = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName)
-        dns_names = san_ext.value.get_values_for_type(x509.DNSName)
-        for dns_name in dns_names:
-            try:
-                return UUID(dns_name)
-            except ValueError:
-                import re
-                uuid_match = re.search(
-                    r"[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}",
-                    dns_name,
-                    re.IGNORECASE,
-                )
-                if uuid_match:
-                    return UUID(uuid_match.group())
+        values.extend(san_ext.value.get_values_for_type(x509.DNSName))
     except x509.ExtensionNotFound:
         pass
 
-    return None
+    identities: set[UUID] = set()
+    for value in values:
+        match = pattern.search(value)
+        if match:
+            identities.add(UUID(match.group()))
+
+    if len(identities) != 1:
+        if len(identities) > 1:
+            logger.warning("mtls.certificate_identity_conflict")
+        return None
+    return next(iter(identities))
 
 
 def _compute_fingerprint(cert_der: bytes) -> str:

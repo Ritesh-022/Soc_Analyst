@@ -109,6 +109,7 @@ class Settings:
         "DATABASE_URL",
         "postgresql+asyncpg://ascense:ascense_dev_password@localhost:5432/ascense",
     )
+    DATABASE_RUNTIME_ROLE: str = os.getenv("ASCENSE_DB_RUNTIME_ROLE", "ascense")
 
     # RabbitMQ
     RABBITMQ_URL: str = os.getenv(

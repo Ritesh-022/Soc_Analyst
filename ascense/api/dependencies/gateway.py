@@ -84,6 +84,9 @@ async def get_gateway_context(
     row = result.mappings().one_or_none()
     if row is None:
         _reject("Gateway certificate is not authorized.", status.HTTP_401_UNAUTHORIZED)
+    certificate_gateway_id = getattr(request.state, "gateway_id", None)
+    if certificate_gateway_id != str(row["gateway_id"]):
+        _reject("Gateway certificate identity is inconsistent.", status.HTTP_401_UNAUTHORIZED)
 
     context = GatewayAuthContext(
         gateway_id=row["gateway_id"],

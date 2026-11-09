@@ -243,6 +243,7 @@ class DetectionFinding(Base, TenantMixin):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     event_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    dedupe_key: Mapped[str | None] = mapped_column(String(512), unique=True)
 
 
 class Alert(Base, TenantMixin):
@@ -268,6 +269,10 @@ class Alert(Base, TenantMixin):
     event_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     evidence_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     affected_asset_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    detection_finding_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("detection_findings.id", ondelete="SET NULL"),
+        unique=True,
+    )
 
 
 class Incident(Base, TenantMixin):

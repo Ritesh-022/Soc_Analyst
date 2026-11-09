@@ -1,6 +1,10 @@
 -- database/policies/rls.sql
 -- Row-Level Security policies for tenant-owned tables.
 --
+-- Reference only: database/migrations/versions/0007_phase1_rls.py is the
+-- authoritative schema-evolution mechanism. Do not apply this file after
+-- running Alembic migrations; doing so attempts to recreate the same policies.
+--
 -- FAIL-CLOSED: if app.tenant_id is not set, NO rows are visible.
 -- This prevents accidental cross-tenant access when the API forgets
 -- to set the tenant context.

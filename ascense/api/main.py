@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
 from ascense.api.middleware.audit import AuditMiddleware
+from ascense.api.middleware.body_limit import EventBodyLimitMiddleware
 from ascense.api.middleware.mtls import GatewayMTLSMiddleware
 from ascense.api.middleware.tenant import TenantMiddleware
 from ascense.api.middleware.tracing import TracingMiddleware
@@ -134,6 +135,7 @@ def create_app() -> FastAPI:
     app.add_middleware(GatewayMTLSMiddleware)
     app.add_middleware(TenantMiddleware)
     app.add_middleware(AuditMiddleware)
+    app.add_middleware(EventBodyLimitMiddleware)
 
     app.include_router(health.router)
     app.include_router(identity.router)

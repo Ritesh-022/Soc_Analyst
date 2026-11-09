@@ -8,12 +8,17 @@ from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from ascense.api.middleware.mtls import (
     _compute_fingerprint,
+    _extract_gateway_id_from_cert,
     _has_approved_gateway_profile,
     _verify_certificate,
 )
 
 
-def _certificate(*, include_client_auth: bool = True) -> tuple[x509.Certificate, x509.Certificate]:
+def _certificate(
+    *,
+    include_client_auth: bool = True,
+    san_gateway_id: str | None = None,
+) -> tuple[x509.Certificate, x509.Certificate]:
     ca_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Ascense Test CA")])
     ca = (
@@ -56,7 +61,9 @@ def _certificate(*, include_client_auth: bool = True) -> tuple[x509.Certificate,
         )
         .add_extension(x509.ExtendedKeyUsage(eku), critical=True)
         .add_extension(
-            x509.SubjectAlternativeName([x509.DNSName(gateway_id)]),
+            x509.SubjectAlternativeName(
+                [x509.DNSName(san_gateway_id or gateway_id)]
+            ),
             critical=False,
         )
         .sign(ca_key, hashes.SHA256())
@@ -92,3 +99,13 @@ def test_pem_is_not_accepted_as_forwarded_der():
         leaf.public_bytes(serialization.Encoding.PEM),
         ca,
     ) is None
+
+
+def test_conflicting_certificate_identities_are_rejected():
+    ca, leaf = _certificate(san_gateway_id=str(uuid4()))
+
+    assert _extract_gateway_id_from_cert(leaf) is None
+    assert _verify_certificate(
+        leaf.public_bytes(serialization.Encoding.DER),
+        ca,
+    ) == leaf

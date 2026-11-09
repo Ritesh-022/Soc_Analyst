@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ascense.api.dependencies.auth import get_tenant_id
 from ascense.api.dependencies.gateway import GatewayAuthContext, get_gateway_context
+from ascense.api.middleware.body_limit import MAX_EVENT_BODY_BYTES
 from ascense.config import get_settings
 from ascense.db import get_session
 from ascense.models import Event, EventIngestionKey, Outbox
@@ -42,7 +43,7 @@ ALLOWED_SENSOR_NAMES = {"suricata", "zeek"}
 MAX_BATCH_SIZE = 1000
 
 # Maximum payload size in bytes (10 MB)
-MAX_PAYLOAD_BYTES = 10 * 1024 * 1024
+MAX_PAYLOAD_BYTES = MAX_EVENT_BODY_BYTES
 
 # W3C source URN pattern: urn:ascense:gateway:{uuid}/sensor/{instance_id}
 SOURCE_URN_PATTERN = re.compile(

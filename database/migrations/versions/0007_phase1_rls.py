@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 
 from alembic import op
+
+from ascense.config import get_settings
 
 revision: str = "0007_phase1_rls"
 down_revision: str | None = "0006_phase1_identity_integrity"
@@ -143,8 +146,11 @@ def upgrade() -> None:
     op.execute(
         "REVOKE ALL ON FUNCTION authenticate_gateway_certificate(text) FROM PUBLIC"
     )
+    runtime_role = get_settings().DATABASE_RUNTIME_ROLE
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", runtime_role):
+        raise ValueError("ASCENSE_DB_RUNTIME_ROLE must be a valid PostgreSQL role name")
     op.execute(
-        "GRANT EXECUTE ON FUNCTION authenticate_gateway_certificate(text) TO CURRENT_USER"
+        f'GRANT EXECUTE ON FUNCTION authenticate_gateway_certificate(text) TO "{runtime_role}"'
     )
 
 

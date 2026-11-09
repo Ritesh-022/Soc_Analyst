@@ -139,14 +139,6 @@ jobs:
             alembic heads
             exit 1
           fi
-      - name: Apply RLS policies
-        env:
-          PGHOST: localhost
-          PGPORT: 5432
-          PGUSER: ascense
-          PGPASSWORD: ascense_dev_password
-          PGDATABASE: ascense
-        run: psql -f database/policies/rls.sql
       - name: Run integration tests
         run: python -m pytest tests/integration/ -v --tb=short
       - name: Run tenant isolation tests

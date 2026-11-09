@@ -7,15 +7,13 @@ for each finding so the correlation worker can pick them up.
 
 from __future__ import annotations
 
-import asyncio
-import json
 from uuid import UUID, uuid7
 
-import aio_pika
 import structlog
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ascense.broker import QUEUE_DETECTION, get_channel, publish
+from ascense.broker import QUEUE_DETECTION, IdempotentConsumer, publish
 from ascense.db import async_session_factory
 from ascense.models import DetectionFinding, Event
 
@@ -249,8 +247,27 @@ async def evaluate_event(event: Event, session: AsyncSession) -> list[DetectionF
                 confidence=result["confidence"],
                 observed_at=event.observed_at,
                 event_ids=[str(event.id)],
+                dedupe_key=f"{event.id}:{rule.detector_id}",
             )
-            session.add(finding)
+            values = {}
+            for column in DetectionFinding.__table__.columns:
+                value = getattr(finding, column.name)
+                if value is None and (
+                    column.server_default is not None or column.default is not None
+                ):
+                    continue
+                values[column.name] = value
+            statement = (
+                insert(DetectionFinding)
+                .values(**values)
+                .on_conflict_do_nothing(index_elements=[DetectionFinding.dedupe_key])
+                .returning(DetectionFinding.id)
+            )
+            result = await session.execute(statement)
+            inserted_id = result.scalar_one_or_none()
+            if inserted_id is None:
+                continue
+            finding.id = inserted_id
             findings.append(finding)
             logger.info(
                 "detection.finding_created",
@@ -277,29 +294,25 @@ async def evaluate_event(event: Event, session: AsyncSession) -> list[DetectionF
     return findings
 
 
-async def _handle_message(message: aio_pika.IncomingMessage) -> None:
-    async with message.process(requeue=True):
-        try:
-            payload = json.loads(message.body)
-            event_id = payload.get("event_id")
-            if not event_id:
-                logger.warning("detection.missing_event_id")
+class DetectionConsumer(IdempotentConsumer):
+    def __init__(self) -> None:
+        super().__init__(QUEUE_DETECTION, "detection-worker")
+
+    async def handle_message(self, payload: dict) -> None:
+        event_id = payload.get("event_id")
+        if not event_id:
+            logger.warning("detection.missing_event_id")
+            return
+
+        async with async_session_factory() as session:
+            from sqlalchemy import select
+
+            result = await session.execute(select(Event).where(Event.id == UUID(event_id)))
+            event = result.scalar_one_or_none()
+            if not event:
+                logger.warning("detection.event_not_found", event_id=event_id)
                 return
-
-            async with async_session_factory() as session:
-                from sqlalchemy import select
-
-                result = await session.execute(
-                    select(Event).where(Event.id == UUID(event_id))
-                )
-                event = result.scalar_one_or_none()
-                if not event:
-                    logger.warning("detection.event_not_found", event_id=event_id)
-                    return
-                await evaluate_event(event, session)
-        except Exception:
-            logger.exception("detection.message_error")
-            raise  # triggers requeue
+            await evaluate_event(event, session)
 
 
 # ---------------------------------------------------------------------------
@@ -309,8 +322,4 @@ async def _handle_message(message: aio_pika.IncomingMessage) -> None:
 
 async def run_worker() -> None:
     logger.info("detection_worker.starting")
-    channel = await get_channel()
-    queue = await channel.get_queue(QUEUE_DETECTION)
-    await queue.consume(_handle_message)
-    logger.info("detection_worker.consuming", queue=QUEUE_DETECTION)
-    await asyncio.Future()  # run forever
+    await DetectionConsumer().run_forever()
