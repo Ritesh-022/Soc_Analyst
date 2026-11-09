@@ -68,14 +68,23 @@ class TenantMixin:
     )
 
 
-async def get_session() -> AsyncGenerator[AsyncSession, None]:
+async def get_session(
+    request: Request,
+) -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency that provides a database session.
 
-    Use this for routes that don't need RLS enforcement (e.g., internal
-    service endpoints, health checks). For tenant-scoped routes, use
-    get_tenant_session() instead.
+    If middleware has already established a tenant, set the transaction-local
+    RLS context before yielding the session. Gateway authentication establishes
+    the context after registry authorization because its certificate lookup
+    must not trust request headers.
     """
     async with async_session_factory() as session:
+        tenant_id = getattr(request.state, "tenant_id", None)
+        if tenant_id:
+            await session.execute(
+                sa_text("SELECT set_config('app.tenant_id', :tenant_id, true)"),
+                {"tenant_id": str(tenant_id)},
+            )
         try:
             yield session
             await session.commit()
@@ -102,7 +111,7 @@ async def get_tenant_session(
     async with async_session_factory() as session:
         if tenant_id:
             await session.execute(
-                sa_text("SET LOCAL app.tenant_id = :tenant_id"),
+                sa_text("SELECT set_config('app.tenant_id', :tenant_id, true)"),
                 {"tenant_id": str(tenant_id)},
             )
         try:
@@ -120,6 +129,6 @@ async def set_tenant_context(session: AsyncSession, tenant_id: UUID) -> None:
     RLS policies are enforced.
     """
     await session.execute(
-        sa_text("SET LOCAL app.tenant_id = :tenant_id"),
+        sa_text("SELECT set_config('app.tenant_id', :tenant_id, true)"),
         {"tenant_id": str(tenant_id)},
     )

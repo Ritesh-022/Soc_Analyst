@@ -12,50 +12,73 @@
 -- migration owner / superuser). Superusers bypass RLS by default in
 -- PostgreSQL, so the application role must NOT be a superuser.
 --
--- Run once after migrations:
---   psql "$DATABASE_URL" -f database/policies/rls.sql
-
--- Enable RLS on all tenant-owned tables
-ALTER TABLE gateways ENABLE ROW LEVEL SECURITY;
-ALTER TABLE enrollment_tokens ENABLE ROW LEVEL SECURITY;
-ALTER TABLE assets ENABLE ROW LEVEL SECURITY;
-ALTER TABLE events ENABLE ROW LEVEL SECURITY;
-ALTER TABLE detection_findings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE alerts ENABLE ROW LEVEL SECURITY;
-ALTER TABLE incidents ENABLE ROW LEVEL SECURITY;
-ALTER TABLE evidence ENABLE ROW LEVEL SECURITY;
-ALTER TABLE action_proposals ENABLE ROW LEVEL SECURITY;
-ALTER TABLE approvals ENABLE ROW LEVEL SECURITY;
-ALTER TABLE commands ENABLE ROW LEVEL SECURITY;
-ALTER TABLE execution_attempts ENABLE ROW LEVEL SECURITY;
-ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY;
-ALTER TABLE policy_versions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE outbox ENABLE ROW LEVEL SECURITY;
-ALTER TABLE gateway_certificates ENABLE ROW LEVEL SECURITY;
-ALTER TABLE memberships ENABLE ROW LEVEL SECURITY;
-ALTER TABLE execution_journal ENABLE ROW LEVEL SECURITY;
-
 -- Helper function: returns the tenant_id from the session context.
 -- Returns NULL if not set — policies below fail-closed on NULL.
 CREATE OR REPLACE FUNCTION current_tenant_id() RETURNS uuid AS $$
   SELECT NULLIF(current_setting('app.tenant_id', true), '')::uuid;
 $$ LANGUAGE sql STABLE;
 
+-- Enable and force RLS so table owners cannot bypass these policies.
+ALTER TABLE gateways ENABLE ROW LEVEL SECURITY;
+ALTER TABLE gateways FORCE ROW LEVEL SECURITY;
+ALTER TABLE enrollment_tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE enrollment_tokens FORCE ROW LEVEL SECURITY;
+ALTER TABLE assets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE assets FORCE ROW LEVEL SECURITY;
+ALTER TABLE events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE events FORCE ROW LEVEL SECURITY;
+ALTER TABLE event_ingestion_keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE event_ingestion_keys FORCE ROW LEVEL SECURITY;
+ALTER TABLE detection_findings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE detection_findings FORCE ROW LEVEL SECURITY;
+ALTER TABLE alerts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE alerts FORCE ROW LEVEL SECURITY;
+ALTER TABLE incidents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE incidents FORCE ROW LEVEL SECURITY;
+ALTER TABLE evidence ENABLE ROW LEVEL SECURITY;
+ALTER TABLE evidence FORCE ROW LEVEL SECURITY;
+ALTER TABLE action_proposals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE action_proposals FORCE ROW LEVEL SECURITY;
+ALTER TABLE approvals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE approvals FORCE ROW LEVEL SECURITY;
+ALTER TABLE commands ENABLE ROW LEVEL SECURITY;
+ALTER TABLE commands FORCE ROW LEVEL SECURITY;
+ALTER TABLE execution_attempts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE execution_attempts FORCE ROW LEVEL SECURITY;
+ALTER TABLE audit_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_events FORCE ROW LEVEL SECURITY;
+ALTER TABLE policy_versions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE policy_versions FORCE ROW LEVEL SECURITY;
+ALTER TABLE outbox ENABLE ROW LEVEL SECURITY;
+ALTER TABLE outbox FORCE ROW LEVEL SECURITY;
+ALTER TABLE gateway_certificates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE gateway_certificates FORCE ROW LEVEL SECURITY;
+ALTER TABLE memberships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE memberships FORCE ROW LEVEL SECURITY;
+ALTER TABLE execution_journal ENABLE ROW LEVEL SECURITY;
+ALTER TABLE execution_journal FORCE ROW LEVEL SECURITY;
+
 -- FAIL-CLOSED policies: rows are visible ONLY when tenant_id matches.
 -- If current_tenant_id() returns NULL, no rows are returned.
 -- This is the opposite of fail-open — missing context = no access.
 
 CREATE POLICY tenant_isolation ON gateways
-  USING (tenant_id = current_tenant_id());
+  USING (tenant_id = current_tenant_id())
+  WITH CHECK (tenant_id = current_tenant_id());
 
 CREATE POLICY tenant_isolation ON enrollment_tokens
-  USING (tenant_id = current_tenant_id());
+  USING (tenant_id = current_tenant_id())
+  WITH CHECK (tenant_id = current_tenant_id());
 
 CREATE POLICY tenant_isolation ON assets
   USING (tenant_id = current_tenant_id());
 
 CREATE POLICY tenant_isolation ON events
   USING (tenant_id = current_tenant_id());
+
+CREATE POLICY tenant_isolation ON event_ingestion_keys
+  USING (tenant_id = current_tenant_id())
+  WITH CHECK (tenant_id = current_tenant_id());
 
 CREATE POLICY tenant_isolation ON detection_findings
   USING (tenant_id = current_tenant_id());

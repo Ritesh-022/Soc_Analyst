@@ -30,6 +30,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ascense.api.dependencies.auth import get_tenant_id
+from ascense.api.dependencies.gateway import GatewayAuthContext, get_gateway_context
 from ascense.config import get_settings
 from ascense.db import get_session
 from ascense.models import (
@@ -260,6 +261,7 @@ async def claim_command(
     gateway_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    gateway_context: GatewayAuthContext = Depends(get_gateway_context),
 ) -> dict:
     """Atomic lease claim: gateway claims the next available queued command.
 
@@ -330,6 +332,7 @@ async def acknowledge_command(
     command_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    gateway_context: GatewayAuthContext = Depends(get_gateway_context),
 ) -> dict:
     """Gateway confirms it has received and accepted the command.
 
@@ -375,6 +378,7 @@ async def report_execution_result(
     body: ExecutionResultRequest,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    gateway_context: GatewayAuthContext = Depends(get_gateway_context),
 ) -> dict:
     """Gateway reports the execution result for a command.
 

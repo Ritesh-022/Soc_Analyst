@@ -1,7 +1,7 @@
 """Add execution_journal table for durable gateway-side recording.
 
 Revision ID: 0004_execution_journal
-Revises: 0005_merge_heads (merged from both 0003 branches)
+Revises: 0002_outbox_and_audit
 Create Date: 2026-11-06
 
 The execution journal is a durable record that the gateway creates
@@ -23,7 +23,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision: str = "0004_execution_journal"
-down_revision: str | None = "0005_merge_heads"
+down_revision: str | None = "0002_outbox_and_audit"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

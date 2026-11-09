@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ascense.api.dependencies.auth import get_tenant_id, require_role
+from ascense.api.dependencies.gateway import GatewayAuthContext, get_gateway_context
 from ascense.config import get_settings
 from ascense.db import get_session
 from ascense.models import EnrollmentToken, Gateway, GatewayCertificate
@@ -267,6 +268,7 @@ async def gateway_heartbeat(
     body: HeartbeatRequest,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    gateway_context: GatewayAuthContext = Depends(get_gateway_context),
 ) -> dict:
     """Gateway heartbeat with sensor health.
 
@@ -347,7 +349,9 @@ async def enroll_gateway(
 
     # Validate the token
     result = await session.execute(
-        select(EnrollmentToken).where(EnrollmentToken.token == body.token)
+        select(EnrollmentToken)
+        .where(EnrollmentToken.token == body.token)
+        .with_for_update()
     )
     token = result.scalar_one_or_none()
 
@@ -366,7 +370,9 @@ async def enroll_gateway(
 
     # Load the gateway
     result = await session.execute(
-        select(Gateway).where(Gateway.id == token.gateway_id)
+        select(Gateway)
+        .where(Gateway.id == token.gateway_id)
+        .with_for_update()
     )
     gateway = result.scalar_one_or_none()
 
@@ -383,7 +389,7 @@ async def enroll_gateway(
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import ec, rsa
-    from cryptography.x509.oid import NameOID
+    from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
     try:
         csr = x509.load_pem_x509_csr(body.csr_pem.encode())
@@ -399,6 +405,25 @@ async def enroll_gateway(
             status_code=422,
             detail="Invalid CSR: signature verification failed",
         )
+
+    csr_key = csr.public_key()
+    if isinstance(csr_key, rsa.RSAPublicKey):
+        if csr_key.key_size < 2048:
+            raise HTTPException(
+                status_code=422,
+                detail="Gateway RSA key must be at least 2048 bits",
+            )
+    elif isinstance(csr_key, ec.EllipticCurvePublicKey):
+        if csr_key.curve.name not in {"secp256r1", "secp384r1", "secp521r1"}:
+            raise HTTPException(
+                status_code=422,
+                detail="Gateway elliptic-curve key is not approved",
+            )
+    else:
+        raise HTTPException(status_code=422, detail="Gateway public-key algorithm is not approved")
+
+    if csr.signature_hash_algorithm.name not in {"sha256", "sha384", "sha512"}:
+        raise HTTPException(status_code=422, detail="CSR signature algorithm is not approved")
 
     # Build the certificate subject — must include the gateway UUID as CN
     # so the mTLS middleware can bind the certificate to the gateway
@@ -426,6 +451,25 @@ async def enroll_gateway(
             .add_extension(
                 x509.SubjectAlternativeName([x509.DNSName(gateway_uuid_str)]),
                 critical=False,
+            )
+            .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+            .add_extension(
+                x509.KeyUsage(
+                    digital_signature=True,
+                    content_commitment=False,
+                    key_encipherment=isinstance(csr_key, rsa.RSAPublicKey),
+                    data_encipherment=False,
+                    key_agreement=isinstance(csr_key, ec.EllipticCurvePublicKey),
+                    key_cert_sign=False,
+                    crl_sign=False,
+                    encipher_only=False,
+                    decipher_only=False,
+                ),
+                critical=True,
+            )
+            .add_extension(
+                x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]),
+                critical=True,
             )
         )
         cert = cert_builder.sign(dev_key, hashes.SHA256())
@@ -460,6 +504,25 @@ async def enroll_gateway(
                 x509.SubjectAlternativeName([x509.DNSName(gateway_uuid_str)]),
                 critical=False,
             )
+            .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+            .add_extension(
+                x509.KeyUsage(
+                    digital_signature=True,
+                    content_commitment=False,
+                    key_encipherment=isinstance(csr_key, rsa.RSAPublicKey),
+                    data_encipherment=False,
+                    key_agreement=isinstance(csr_key, ec.EllipticCurvePublicKey),
+                    key_cert_sign=False,
+                    crl_sign=False,
+                    encipher_only=False,
+                    decipher_only=False,
+                ),
+                critical=True,
+            )
+            .add_extension(
+                x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]),
+                critical=True,
+            )
         )
 
         if isinstance(ca_key, (rsa.RSAPrivateKey, ec.EllipticCurvePrivateKey)):
@@ -474,7 +537,9 @@ async def enroll_gateway(
         ca_chain_pem = ca_cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
 
     cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
-    fingerprint = hashlib.sha256(cert_pem.encode()).hexdigest()
+    fingerprint = hashlib.sha256(
+        cert.public_bytes(serialization.Encoding.DER)
+    ).hexdigest()
 
     # Store the certificate record
     gateway_cert = GatewayCertificate(
@@ -564,6 +629,7 @@ async def get_gateway_configuration(
     gateway_id: UUID,
     request: Request,
     session: AsyncSession = Depends(get_session),
+    gateway_context: GatewayAuthContext = Depends(get_gateway_context),
 ) -> dict:
     """Return the authorized configuration for a gateway.
 

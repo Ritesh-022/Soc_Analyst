@@ -17,12 +17,14 @@ from uuid import UUID, uuid7
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ascense.api.dependencies.auth import get_tenant_id
+from ascense.api.dependencies.gateway import GatewayAuthContext, get_gateway_context
 from ascense.config import get_settings
 from ascense.db import get_session
-from ascense.models import Event, Outbox
+from ascense.models import Event, EventIngestionKey, Outbox
 
 router = APIRouter(tags=["Events"])
 
@@ -111,6 +113,7 @@ async def ingest_event_batch(
     batch: list[EventBatchItem],
     request: Request,
     session: AsyncSession = Depends(get_session),
+    gateway_context: GatewayAuthContext = Depends(get_gateway_context),
 ) -> EventBatchResponse:
     """Accept a batch of events from an authenticated gateway.
 
@@ -125,8 +128,16 @@ async def ingest_event_batch(
     accepted = 0
     rejections: list[dict] = []
 
-    authenticated_tenant_id = getattr(request.state, "tenant_id", None)
-    authenticated_gateway_id = getattr(request.state, "gateway_id", None)
+    authenticated_tenant_id = (
+        str(gateway_context.tenant_id)
+        if gateway_context.tenant_id
+        else None
+    )
+    authenticated_gateway_id = (
+        str(gateway_context.gateway_id)
+        if gateway_context.gateway_id
+        else None
+    )
 
     # Resolve environment once at the top
     _is_dev = get_settings().is_dev
@@ -271,21 +282,6 @@ async def ingest_event_batch(
             })
             continue
 
-        # Check for duplicates using (source, id) scoped to the tenant
-        # to prevent cross-tenant existence leaks
-        dedup_query = select(Event.id).where(
-            Event.source == event.source,
-            Event.source_event_id == source_event_id,
-        )
-        if resolved_tenant_id:
-            dedup_query = dedup_query.where(Event.tenant_id == resolved_tenant_id)
-
-        existing = await session.execute(dedup_query)
-        if existing.scalar_one_or_none() is not None:
-            # Duplicate event — silently skip, do not create another
-            accepted += 1
-            continue
-
         # Use resolved identities (from authenticated context or dev headers)
         tenant_id = resolved_tenant_id
         gateway_id = resolved_gateway_id
@@ -307,9 +303,30 @@ async def ingest_event_batch(
                 })
                 continue
 
+        event_id = uuid7()
+        key_result = await session.execute(
+            insert(EventIngestionKey)
+            .values(
+                id=uuid7(),
+                tenant_id=tenant_id,
+                source=event.source,
+                source_event_id=source_event_id,
+                event_id=event_id,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    EventIngestionKey.source,
+                    EventIngestionKey.source_event_id,
+                ]
+            )
+        )
+        if key_result.rowcount == 0:
+            accepted += 1
+            continue
+
         # Create the normalized event record
         event_record = Event(
-            id=uuid7(),
+            id=event_id,
             tenant_id=tenant_id,
             source_event_id=source_event_id,
             source=event.source,

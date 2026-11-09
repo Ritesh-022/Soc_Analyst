@@ -156,7 +156,7 @@ mc mirror minio/ascense-evidence ./backup/evidence/
 
 ## RB-09 · Known Limitations (v1)
 
-- **mTLS not yet enforced**: Gateway identity is currently derived from the `X-Tenant-ID` header in development. Production deployment requires mTLS certificate verification at the reverse proxy layer.
+- **Production mTLS deployment**: Development may use `X-Tenant-ID` and `X-Gateway-ID` headers only when `ASCENSE_ENV=development`. Production must deploy the HAProxy configuration in `infrastructure/deployment/haproxy.cfg`, which terminates gateway mTLS, strips client-supplied identity headers, forwards one Base64-DER certificate header, and authenticates to the API with internal mTLS. The API container must use the production Compose command and mount `api-server.pem`, `api-server-key.pem`, and `proxy-ca.pem`; otherwise the proxy-to-API client certificate is not enforced.
 - **OIDC not yet integrated**: User authentication uses `X-User-ID` header in development. Production requires a real OIDC provider configured via `JWT_ISSUER` and `JWT_AUDIENCE`.
 - **AI investigation is a stub**: The investigation worker exists but does not yet call an LLM. Full LangGraph integration is Stage 5 work.
 - **OPA/Rego policy gate is in-process**: The policy engine runs as a Python function, not a separate OPA process. Production should use the OPA binary for policy isolation.

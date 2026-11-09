@@ -1,0 +1,45 @@
+services:
+  ascense-api:
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/Dockerfile.api
+    expose:
+      - "8000"
+    env_file:
+      - path: ../../.env.production
+        required: false
+    command:
+      - uvicorn
+      - ascense.api.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --ssl-keyfile
+      - /etc/ascense/certs/api-server-key.pem
+      - --ssl-certfile
+      - /etc/ascense/certs/api-server.pem
+      - --ssl-ca-certs
+      - /etc/ascense/certs/proxy-ca.pem
+      - --ssl-cert-reqs
+      - "2"
+    volumes:
+      - ./certs:/etc/ascense/certs:ro
+    networks:
+      - ascense-internal
+
+  gateway-proxy:
+    image: haproxy:3.0-alpine
+    depends_on:
+      - ascense-api
+    ports:
+      - "443:8443"
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ./certs:/etc/haproxy/certs:ro
+    networks:
+      - ascense-internal
+
+networks:
+  ascense-internal:
+    internal: true

@@ -34,10 +34,12 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Integer,
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -120,6 +122,9 @@ class Gateway(Base, TenantMixin):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    __table_args__ = (
+        UniqueConstraint("id", "tenant_id", name="uq_gateways_id_tenant_id"),
+    )
 
 
 class EnrollmentToken(Base, TenantMixin):
@@ -196,12 +201,25 @@ class Event(Base, TenantMixin):
     destination_asset_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     data: Mapped[dict] = mapped_column(JSONB, nullable=False)
 
-    # Deduplication constraint: one event per (source, id) pair
-    __table_args__ = (
-        # Unique constraint on (source, source_event_id) for deduplication
-        # Using a unique index instead of a constraint since source is a URN string
-    )
+class EventIngestionKey(Base, TenantMixin):
+    """Atomic idempotency key for partitioned event ingestion."""
 
+    __tablename__ = "event_ingestion_keys"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    source: Mapped[str] = mapped_column(String(512), nullable=False)
+    source_event_id: Mapped[str] = mapped_column(String(512), nullable=False)
+    event_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    __table_args__ = (
+        UniqueConstraint(
+            "source",
+            "source_event_id",
+            name="uq_event_ingestion_keys_source_event_id",
+        ),
+    )
 
 # ---------------------------------------------------------------------------
 # Detection Findings → Alerts → Incidents
@@ -481,6 +499,7 @@ class ExecutionJournal(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
+
 class Outbox(Base):
     """Outbox record written in the same transaction as the event.
     The publisher worker reads pending records and publishes to RabbitMQ.
@@ -521,7 +540,12 @@ class GatewayCertificate(Base):
     gateway_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("gateways.id", ondelete="CASCADE"), nullable=False
     )
-    tenant_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False, index=True)
+    tenant_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     fingerprint: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
     certificate_pem: Mapped[str] = mapped_column(Text, nullable=False)
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -530,4 +554,12 @@ class GatewayCertificate(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="ACTIVE")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["gateway_id", "tenant_id"],
+            ["gateways.id", "gateways.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_gateway_certificates_gateway_tenant",
+        ),
     )

@@ -6,10 +6,10 @@ gateway_id in the URL path.
 
 In production:
   1. The reverse proxy terminates TLS and forwards the client certificate
-     in the X-Client-Cert header (PEM-encoded)
+     in the X-Client-Cert header (Base64-encoded DER)
   2. This middleware validates the certificate chain against GATEWAY_CA_CERT
-  3. The certificate fingerprint is checked against the gateway_certificates
-     table for revocation and expiry
+  3. The gateway dependency checks the fingerprint against the
+     gateway_certificates table for authorization and revocation
   4. The gateway_id from the URL is matched against the certificate's CN/SAN
 
 In development:
@@ -19,6 +19,8 @@ In development:
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,7 +28,9 @@ from uuid import UUID
 
 import structlog
 from cryptography import x509
-from cryptography.exceptions import InvalidSignature
+from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
+from cryptography.x509.oid import ExtendedKeyUsageOID
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -52,11 +56,17 @@ def _load_ca_cert() -> x509.Certificate | None:
         return None
 
 
-def _verify_certificate(cert_pem: str, ca_cert: x509.Certificate | None) -> x509.Certificate | None:
+MAX_FORWARDED_CERT_BYTES = 16 * 1024
+
+
+def _verify_certificate(
+    cert_der: bytes,
+    ca_cert: x509.Certificate | None,
+) -> x509.Certificate | None:
     """Parse and validate a client certificate.
 
     Checks:
-      - Certificate parses as valid X.509 PEM
+      - Certificate parses as one DER-encoded X.509 certificate
       - Certificate is not expired
       - Certificate chain validates against the CA (if CA is configured)
       - Certificate is not self-signed when a CA is configured
@@ -64,7 +74,7 @@ def _verify_certificate(cert_pem: str, ca_cert: x509.Certificate | None) -> x509
     Returns the parsed certificate object or None on failure.
     """
     try:
-        cert = x509.load_pem_x509_certificate(cert_pem.encode())
+        cert = x509.load_der_x509_certificate(cert_der)
     except Exception:
         logger.warning("mtls.cert_parse_failed")
         return None
@@ -85,6 +95,9 @@ def _verify_certificate(cert_pem: str, ca_cert: x509.Certificate | None) -> x509
         logger.warning("mtls.cert_expired")
         return None
 
+    if not _has_approved_gateway_profile(cert):
+        return None
+
     # Verify chain against CA if configured
     if ca_cert is not None:
         try:
@@ -95,6 +108,10 @@ def _verify_certificate(cert_pem: str, ca_cert: x509.Certificate | None) -> x509
 
             # Verify the signature using the CA's public key
             ca_public_key = ca_cert.public_key()
+            signature_hash_algorithm = cert.signature_hash_algorithm
+            if signature_hash_algorithm is None:
+                logger.warning("mtls.signature_algorithm_missing")
+                return None
             # cryptography >= 42 checks this via the signature algorithm
             from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 
@@ -103,13 +120,13 @@ def _verify_certificate(cert_pem: str, ca_cert: x509.Certificate | None) -> x509
                     cert.signature,
                     cert.tbs_certificate_bytes,
                     padding.PKCS1v15(),
-                    cert.signature_hash_algorithm,
+                    signature_hash_algorithm,
                 )
             elif isinstance(ca_public_key, ec.EllipticCurvePublicKey):
                 ca_public_key.verify(
                     cert.signature,
                     cert.tbs_certificate_bytes,
-                    ec.ECDSA(cert.signature_hash_algorithm),
+                    ec.ECDSA(signature_hash_algorithm),
                 )
             else:
                 logger.warning("mtls.unsupported_ca_key_type")
@@ -126,6 +143,60 @@ def _verify_certificate(cert_pem: str, ca_cert: x509.Certificate | None) -> x509
     return cert
 
 
+def _has_approved_gateway_profile(cert: x509.Certificate) -> bool:
+    """Validate the initial gateway leaf-certificate profile."""
+    public_key = cert.public_key()
+    if isinstance(public_key, rsa.RSAPublicKey):
+        if public_key.key_size < 2048:
+            logger.warning("mtls.rsa_key_too_small")
+            return False
+    elif isinstance(public_key, ec.EllipticCurvePublicKey):
+        if public_key.curve.name not in {"secp256r1", "secp384r1", "secp521r1"}:
+            logger.warning("mtls.ec_curve_not_approved")
+            return False
+    else:
+        logger.warning("mtls.public_key_type_not_approved")
+        return False
+
+    try:
+        signature_hash = cert.signature_hash_algorithm
+    except (UnsupportedAlgorithm, ValueError):
+        logger.warning("mtls.signature_algorithm_not_approved")
+        return False
+    if signature_hash is None or signature_hash.name not in {"sha256", "sha384", "sha512"}:
+        logger.warning("mtls.signature_algorithm_not_approved")
+        return False
+
+    try:
+        basic_constraints = cert.extensions.get_extension_for_class(
+            x509.BasicConstraints
+        ).value
+        key_usage = cert.extensions.get_extension_for_class(x509.KeyUsage).value
+        extended_key_usage = cert.extensions.get_extension_for_class(
+            x509.ExtendedKeyUsage
+        ).value
+        san = cert.extensions.get_extension_for_class(
+            x509.SubjectAlternativeName
+        ).value
+    except (x509.ExtensionNotFound, ValueError):
+        logger.warning("mtls.required_certificate_extension_missing")
+        return False
+
+    if basic_constraints.ca:
+        logger.warning("mtls.gateway_certificate_is_ca")
+        return False
+    if not key_usage.digital_signature or key_usage.key_cert_sign:
+        logger.warning("mtls.invalid_gateway_key_usage")
+        return False
+    if ExtendedKeyUsageOID.CLIENT_AUTH not in extended_key_usage:
+        logger.warning("mtls.client_auth_eku_missing")
+        return False
+    if not san:
+        logger.warning("mtls.gateway_san_missing")
+        return False
+    return True
+
+
 def _extract_gateway_id_from_cert(cert: x509.Certificate) -> UUID | None:
     """Extract the gateway UUID from the certificate's CN or SAN.
 
@@ -136,7 +207,7 @@ def _extract_gateway_id_from_cert(cert: x509.Certificate) -> UUID | None:
     try:
         cn_attrs = cert.subject.get_attributes_for_oid(x509.NameOID.COMMON_NAME)
         if cn_attrs:
-            cn_value = cn_attrs[0].value
+            cn_value = str(cn_attrs[0].value)
             # The CN may be "gateway-{uuid}" or just the UUID
             # Try to extract a UUID from the CN
             try:
@@ -176,9 +247,9 @@ def _extract_gateway_id_from_cert(cert: x509.Certificate) -> UUID | None:
     return None
 
 
-def _compute_fingerprint(cert_pem: str) -> str:
-    """Compute the SHA-256 fingerprint of the certificate PEM."""
-    return hashlib.sha256(cert_pem.encode()).hexdigest()
+def _compute_fingerprint(cert_der: bytes) -> str:
+    """Compute the SHA-256 fingerprint of canonical DER certificate bytes."""
+    return hashlib.sha256(cert_der).hexdigest()
 
 
 # Endpoints exempt from gateway mTLS (they have their own auth mechanism)
@@ -192,11 +263,11 @@ class GatewayMTLSMiddleware(BaseHTTPMiddleware):
 
     In production, the reverse proxy must forward the client certificate.
     This middleware checks:
-      1. A certificate was presented (PEM in X-Client-Cert header)
+      1. A certificate was presented (Base64-encoded DER in X-Client-Cert)
       2. The certificate chain validates against GATEWAY_CA_CERT
-      3. The certificate is not expired or revoked
+      3. The certificate is not expired
       4. The gateway_id in the URL matches the certificate's CN/SAN
-      5. The verified gateway identity (including tenant_id) is set on request.state
+      5. The transport identity is made available for database authorization
     """
 
     async def dispatch(self, request: Request, call_next):
@@ -219,26 +290,32 @@ class GatewayMTLSMiddleware(BaseHTTPMiddleware):
                 request.state.gateway_id = gateway_id
             return await call_next(request)
 
-        # Production: verify client certificate
-        # The reverse proxy forwards the certificate PEM in X-Client-Cert
-        cert_pem = request.headers.get("X-Client-Cert", "")
-
-        if not cert_pem:
+        # Production: verify the single-line Base64-encoded DER certificate
+        # forwarded by the authenticated reverse proxy.
+        cert_headers = request.headers.getlist("X-Client-Cert")
+        if len(cert_headers) != 1 or not cert_headers[0]:
             return _reject_mtls(request, "No client certificate presented")
+
+        try:
+            cert_der = base64.b64decode(cert_headers[0], validate=True)
+        except (binascii.Error, ValueError):
+            return _reject_mtls(request, "Malformed forwarded client certificate")
+
+        if not cert_der or len(cert_der) > MAX_FORWARDED_CERT_BYTES:
+            return _reject_mtls(request, "Invalid forwarded client certificate size")
 
         # Load CA certificate for chain validation
         ca_cert = _load_ca_cert()
-        if ca_cert is None and settings.GATEWAY_CA_CERT:
-            # CA was configured but failed to load — fail closed
+        if ca_cert is None:
             return _reject_mtls(request, "Failed to load gateway CA certificate")
 
         # Parse and validate the certificate
-        cert = _verify_certificate(cert_pem, ca_cert)
+        cert = _verify_certificate(cert_der, ca_cert)
         if cert is None:
             return _reject_mtls(request, "Client certificate verification failed")
 
         # Compute fingerprint for database lookup
-        cert_fingerprint = _compute_fingerprint(cert_pem)
+        cert_fingerprint = _compute_fingerprint(cert_der)
 
         # Extract gateway identity from the certificate
         cert_gateway_id = _extract_gateway_id_from_cert(cert)
@@ -272,6 +349,7 @@ class GatewayMTLSMiddleware(BaseHTTPMiddleware):
 
         # Store the verified identity on request.state for downstream use
         request.state.gateway_id = str(cert_gateway_id)
+        request.state.gateway_certificate_der = cert_der
         request.state.gateway_cert_fingerprint = cert_fingerprint
         request.state.gateway_cert_serial = cert.serial_number
         request.state.gateway_cert_expires_at = cert.not_valid_after
